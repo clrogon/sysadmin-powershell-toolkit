@@ -104,7 +104,7 @@ function Register-EventLogSource {
         [string]$EventLogSource = "PowerShellScripts"
     )
 
-    if (-not ('System.Diagnostics.EventLog' -as [type])) {
+    if (-not [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows)) {
         $script:EventLogReady = $false
         Write-Debug "Event log API unavailable on this platform; event log writes disabled."
         return
