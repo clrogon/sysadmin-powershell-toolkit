@@ -3,8 +3,8 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\ErrorHandling.psm1') -Force
 
 Describe 'ErrorHandling module' {
     BeforeAll {
-        Initialize-ScriptConfiguration -ConfigPath (Join-Path $env:TEMP 'PowerShellScripts_Test_Config.xml') -DefaultConfig (Get-DefaultConfiguration)
-        Initialize-Logging -LogPath (Join-Path $env:TEMP 'PowerShellScripts_Test_ErrorHandling.log') -Component 'ErrorHandlingTests'
+        Initialize-ScriptConfiguration -ConfigPath (Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Config.xml') -DefaultConfig (Get-DefaultConfiguration)
+        Initialize-Logging -LogPath (Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_ErrorHandling.log') -Component 'ErrorHandlingTests'
     }
 
     It 'Test-AdministrativePrivileges returns a boolean' {

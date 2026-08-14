@@ -4,10 +4,10 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration.psm1') -Force
 
 Describe 'Logging module' {
     BeforeAll {
-        $script:testLog = Join-Path $env:TEMP 'PowerShellScripts_Test_Logging.log'
+        $script:testLog = Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Logging.log'
         if (Test-Path $script:testLog) { Remove-Item $script:testLog -Force -ErrorAction SilentlyContinue }
 
-        Initialize-ScriptConfiguration -ConfigPath (Join-Path $env:TEMP 'PowerShellScripts_Test_Config.xml') -DefaultConfig (Get-DefaultConfiguration)
+        Initialize-ScriptConfiguration -ConfigPath (Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Config.xml') -DefaultConfig (Get-DefaultConfiguration)
         Initialize-Logging -LogPath $script:testLog -Component 'LoggingTests'
     }
 
@@ -43,14 +43,14 @@ Describe 'Logging module' {
     }
 
     It 'Log rotation archives an oversized log file' {
-        $rotationLog = Join-Path $env:TEMP 'PowerShellScripts_Test_Rotation.log'
+        $rotationLog = Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Rotation.log'
         if (Test-Path $rotationLog) { Remove-Item $rotationLog -Force -ErrorAction SilentlyContinue }
 
         Set-ScriptConfiguration -Key 'Logging' -Value @{
             DefaultPath   = "$env:ProgramData\PowerShellScripts\Logs"
             MaxSize       = 2KB
             RetentionDays = 30
-        } -ConfigPath (Join-Path $env:TEMP 'PowerShellScripts_Test_Config.xml')
+        } -ConfigPath (Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Config.xml')
 
         Initialize-Logging -LogPath $rotationLog -Component 'RotationTests'
 

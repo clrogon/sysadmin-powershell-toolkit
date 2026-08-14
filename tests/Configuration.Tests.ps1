@@ -3,7 +3,7 @@ Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration.psm1') -Force
 
 Describe 'Configuration module' {
     BeforeAll {
-        $script:tempConfig = Join-Path $env:TEMP 'PowerShellScripts_Test_Config.xml'
+        $script:tempConfig = Join-Path ([System.IO.Path]::GetTempPath()) 'PowerShellScripts_Test_Config.xml'
         if (Test-Path $script:tempConfig) { Remove-Item -Path $script:tempConfig -Force -ErrorAction SilentlyContinue }
     }
 
