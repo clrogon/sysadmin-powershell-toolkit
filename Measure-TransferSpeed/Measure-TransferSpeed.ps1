@@ -1,45 +1,89 @@
-<#
-.Synopsis
-   This PowerShell script measures transfer speeds between servers and logs performance metrics for analysis and troubleshooting purposes.
+﻿<#
+.SYNOPSIS
+    Measures SMB transfer speeds between servers and logs performance metrics.
 
-.Description
-   The script facilitates performance measurement between two specified servers by transferring a test file multiple times and recording duration and speed metrics for each iteration. It provides detailed logs for both performance measurement and script execution, enhancing visibility into network and storage performance. Enhanced with historical tracking, multi-path testing, and trend analysis.
+.DESCRIPTION
+    Creates a test file of the requested size on the source server's admin share
+    and copies it to the destination server's admin share for the requested
+    number of iterations, recording duration and speed per iteration. Supports
+    historical comparison, multi-path testing, throttling analysis, and HTML
+    report generation. Requires administrative access to both servers.
 
-.Example
-   .\Measure-TransferSpeed.ps1 -SourceServer "ABC" -DestinationServer "XYZ" -FileSizeMB 100 -Iterations 5 -IncludeHistoricalComparison
-   Initiates transfer speed measurement between servers "ABC" and "XYZ" using a 100 MB test file for 5 iterations with historical comparison.
+.EXAMPLE
+    .\Measure-TransferSpeed.ps1 -SourceServer ABC -DestinationServer XYZ -FileSizeMB 100 -Iterations 5
 
-.Example
-   .\Measure-TransferSpeed.ps1 -SourceServer "ABC" -DestinationServers @("XYZ", "PDQ") -FileSizeMB 100 -MultiPathTest
-   Tests transfer speeds to multiple destination servers for redundancy validation.
+.EXAMPLE
+    .\Measure-TransferSpeed.ps1 -SourceServer ABC -DestinationServers XYZ,PDQ -FileSizeMB 100 -MultiPathTest
 
-.Example
-   $credential = Get-Credential
-   .\Measure-TransferSpeed.ps1 -SourceServer "ABC" -DestinationServer "XYZ" -FileSizeMB 100 -Credential $credential
-   Initiates transfer speed measurement with authentication using provided credentials.
+.EXAMPLE
+    $cred = Get-Credential
+    .\Measure-TransferSpeed.ps1 -SourceServer ABC -DestinationServer XYZ -FileSizeMB 100 -Credential $cred -IncludeHistoricalComparison
 
-.Inputs
-   Parameters include SourceServer, DestinationServer(s), FileSizeMB, Iterations, Credential, HistoricalDataPath, MultiPathTest options.
-
-.Outputs
-   Detailed logs for performance measurement, historical trends, and multi-path comparison reports.
-
-.Notes
-   This script is designed for system administrators and network engineers to monitor and optimize transfer speeds between servers. It supports both local and remote execution scenarios, enabling comprehensive performance testing in various environments.
-   Version: 2.0
-   Author: Cláudio Gonçalves
-   Last Updated: January 07, 2026
+.NOTES
+    Version: 3.0
+    Author: Claudio Gonçalves
 #>
 
 #Requires -Version 5.1
 
-Import-Module "$PSScriptRoot\..\modules\Configuration.psm1" -Force
-Import-Module "$PSScriptRoot\..\modules\Logging.psm1" -Force
+[CmdletBinding()]
+param(
+    [string]$SourceServer,
+    [string]$DestinationServer,
+    [string[]]$DestinationServers,
+    [switch]$MultiPathTest,
+    [int]$FileSizeMB = 100,
+    [int]$Iterations = 1,
+    [PSCredential]$Credential,
+    [string]$HistoricalDataPath = "$env:USERPROFILE\TransferSpeedHistory.csv",
+    [switch]$IncludeHistoricalComparison,
+    [switch]$GenerateReport,
+    [string]$ReportPath = "$env:USERPROFILE\TransferSpeedReport.html"
+)
+
+Import-Module "$PSScriptRoot\..\modules\ErrorHandling.psm1" -Force
 
 Initialize-ScriptConfiguration -DefaultConfig (Get-DefaultConfiguration)
+Initialize-Logging -Component "Measure-TransferSpeed"
+
+function New-TestFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Path,
+        [long]$SizeBytes
+    )
+
+    if (Test-Path $Path) {
+        Remove-Item $Path -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($SizeBytes -le 0) {
+        return
+    }
+
+    & fsutil.exe file createnew "$Path" "$SizeBytes" 2>$null | Out-Null
+
+    if (-not (Test-Path $Path)) {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::CreateNew)
+        try {
+            $buffer = New-Object byte[] 65536
+            $remaining = $SizeBytes
+            while ($remaining -gt 0) {
+                $chunk = [math]::Min($remaining, $buffer.Length)
+                $stream.Write($buffer, 0, $chunk)
+                $remaining -= $chunk
+            }
+        }
+        finally {
+            $stream.Close()
+        }
+    }
+}
 
 function Measure-TransferSpeed {
-    param (
+    [CmdletBinding()]
+    param(
         [Parameter(Mandatory=$true)]
         [string]$SourceServer,
         [Parameter(Mandatory=$true)]
@@ -48,9 +92,6 @@ function Measure-TransferSpeed {
         [int]$FileSizeMB,
         [int]$Iterations = 1,
         [PSCredential]$Credential,
-        [switch]$CloudEnabled,
-        [string]$MeasurementLogFilePath,
-        [string]$ExecutionLogFilePath,
         [string]$HistoricalDataPath = "$env:USERPROFILE\TransferSpeedHistory.csv",
         [switch]$IncludeHistoricalComparison,
         [switch]$GenerateReport,
@@ -58,185 +99,117 @@ function Measure-TransferSpeed {
     )
 
     try {
-        # Execution Log: Log script start
-        if ($ExecutionLogFilePath) {
-            $logMessage = "Script start: $(Get-Date)"
-            Add-Content -Path $ExecutionLogFilePath -Value $logMessage
-        }
-
-        # Measurement Log: Log start time
-        $startTime = Get-Date
-        if ($MeasurementLogFilePath) {
-            $logMessage = "### Starting operation at $startTime"
-            Add-Content -Path $MeasurementLogFilePath -Value $logMessage
-        }
-
-        # Validate server names to prevent injection
         if ($SourceServer -match '[^a-zA-Z0-9.\-]' -or $DestinationServer -match '[^a-zA-Z0-9.\-]') {
             throw "Invalid server name detected. Server names should only contain alphanumeric characters, dots, and hyphens."
         }
 
-        # Generate file on source server using New-Item
-        $filePath = "\\$SourceServer\file.txt"
-        $destPath = "\\$DestinationServer\file.txt"
-
-        # Create file on source with credential if provided
-        $fileParams = @{
-            Path = $filePath
-            ItemType = "file"
-            Value = " "
-            Force = $true
-            ErrorAction = "Stop"
-        }
+        $sourceFile = "\\$SourceServer\c`$\Windows\Temp\TransferSpeedTest.dat"
+        $destFile = "\\$DestinationServer\c`$\Windows\Temp\TransferSpeedTest.dat"
+        $sourceDriveName = "TSrc"
+        $destDriveName = "TDst"
+        $testFilePath = $sourceFile
+        $destFilePath = $destFile
 
         if ($Credential) {
-            if (-not (Test-Path -Path "\\$SourceServer\`$" -Credential $Credential -ErrorAction SilentlyContinue)) {
-                throw "Unable to connect to source server $SourceServer with provided credentials."
+            $sourceDriveName = "TSrc_$PID"
+            $destDriveName = "TDst_$PID"
+            New-PSDrive -Name $sourceDriveName -PSProvider FileSystem -Root "\\$SourceServer\c`$" -Credential $Credential -ErrorAction Stop | Out-Null
+            New-PSDrive -Name $destDriveName -PSProvider FileSystem -Root "\\$DestinationServer\c`$" -Credential $Credential -ErrorAction Stop | Out-Null
+            $testFilePath = "$($sourceDriveName):\Windows\Temp\TransferSpeedTest.dat"
+            $destFilePath = "$($destDriveName):\Windows\Temp\TransferSpeedTest.dat"
+        }
+
+        try {
+            Write-ScriptLog -Level Info -Message "Creating $FileSizeMB MB test file on $SourceServer"
+            New-TestFile -Path $testFilePath -SizeBytes ($FileSizeMB * 1MB)
+
+            $results = @()
+            for ($i = 1; $i -le $Iterations; $i++) {
+                Write-ScriptLog -Level Info -Message "Iteration ${i}: Transferring file from $SourceServer to $DestinationServer"
+
+                if (Test-Path $destFilePath) {
+                    Remove-Item -Path $destFilePath -Force -ErrorAction SilentlyContinue
+                }
+
+                $iterationStartTime = Get-Date
+                Copy-Item -Path $testFilePath -Destination $destFilePath -ErrorAction Stop
+                $iterationEndTime = Get-Date
+
+                $duration = ($iterationEndTime - $iterationStartTime).TotalSeconds
+                $speed = if ($duration -gt 0) { ($FileSizeMB * 1MB) / $duration } else { 0 }
+
+                $results += [PSCustomObject]@{
+                    Iteration = $i
+                    Duration = $duration
+                    Speed = $speed
+                }
+
+                Write-ScriptLog -Level Info -Message "Iteration ${i} - Duration: $([math]::Round($duration,3)) seconds, Speed: $([math]::Round($speed/1MB,2)) MB/s"
             }
 
-            # Use New-PSDrive for credential-based access
-            $sourceDrive = New-PSDrive -Name "SourceTest" -PSProvider FileSystem -Root "\\$SourceServer\`$" -Credential $Credential -ErrorAction Stop
-            $testFilePath = "SourceTest:\file.txt"
-            New-Item @fileParams | Out-Null
-        } else {
-            New-Item @fileParams | Out-Null
-        }
+            $lowestSpeed = ($results | Measure-Object -Property Speed -Minimum).Minimum
+            $highestSpeed = ($results | Measure-Object -Property Speed -Maximum).Maximum
+            $averageSpeed = ($results | Measure-Object -Property Speed -Average).Average
 
-        # Measure transfer performance
-        $results = @()
-        for ($i = 1; $i -le $Iterations; $i++) {
-            # Execution Log: Log transfer operation
-            if ($ExecutionLogFilePath) {
-                $logMessage = "Iteration $i: Transferring file from $SourceServer to $DestinationServer"
-                Add-Content -Path $ExecutionLogFilePath -Value $logMessage
+            Write-ScriptLog -Level Info -Message "Lowest: $([math]::Round($lowestSpeed/1MB,2)) MB/s - Highest: $([math]::Round($highestSpeed/1MB,2)) MB/s - Average: $([math]::Round($averageSpeed/1MB,2)) MB/s"
+
+            $finalResult = [PSCustomObject]@{
+                LowestSpeed = $lowestSpeed
+                HighestSpeed = $highestSpeed
+                AverageSpeed = $averageSpeed
             }
 
-            $iterationStartTime = Get-Date
-
-            if ($Credential) {
-                # Copy using credential via PSDrive
-                $destDrive = New-PSDrive -Name "DestTest" -PSProvider FileSystem -Root "\\$DestinationServer\`$" -Credential $Credential -ErrorAction Stop
-                Copy-Item -Path $testFilePath -Destination "DestTest:\file.txt" -ErrorAction Stop
-                Remove-PSDrive -Name "DestTest" -Force
-            } else {
-                Copy-Item -Path $filePath -Destination $destPath -ErrorAction Stop
+            $historicalResult = [PSCustomObject]@{
+                Timestamp = Get-Date
+                SourceServer = $SourceServer
+                DestinationServer = $DestinationServer
+                AverageSpeed = $averageSpeed
+                LowestSpeed = $lowestSpeed
+                HighestSpeed = $highestSpeed
+                Iterations = $Iterations
+                FileSizeMB = $FileSizeMB
             }
 
-            $iterationEndTime = Get-Date
+            $historicalResult | Export-Csv -Path $HistoricalDataPath -Append -NoTypeInformation -ErrorAction SilentlyContinue
 
-            $duration = ($iterationEndTime - $iterationStartTime).TotalSeconds
-            $speed = ($FileSizeMB * 1MB) / $duration  # Bytes per second
+            if ($IncludeHistoricalComparison) {
+                $historicalData = @(Import-Csv $HistoricalDataPath -ErrorAction SilentlyContinue |
+                    Where-Object {
+                        $_.SourceServer -eq $SourceServer -and
+                        $_.DestinationServer -eq $DestinationServer -and
+                        $_.Timestamp -ne $historicalResult.Timestamp.ToString()
+                    })
 
-            $results += [PSCustomObject]@{
-                Iteration = $i
-                Duration = $duration
-                Speed = $speed
-            }
+                $pastSpeeds = @($historicalData | ForEach-Object { [double]$_.AverageSpeed })
 
-            # Measurement Log: Log iteration details
-            if ($MeasurementLogFilePath) {
-                $logMessage = "Iteration $i - Duration: $duration seconds, Speed: $speed bytes/second"
-                Add-Content -Path $MeasurementLogFilePath -Value $logMessage
-            }
-        }
-
-        # Calculate lowest, highest, and average speeds
-        $lowestSpeed = $results | Measure-Object -Property Speed -Minimum | Select-Object -ExpandProperty Minimum
-        $highestSpeed = $results | Measure-Object -Property Speed -Maximum | Select-Object -ExpandProperty Maximum
-        $averageSpeed = ($results | Measure-Object -Property Speed -Average).Average
-
-        # Measurement Log: Log report generation
-        if ($MeasurementLogFilePath) {
-            $logMessage = "Lowest Speed: $lowestSpeed bytes/second"
-            Add-Content -Path $MeasurementLogFilePath -Value $logMessage
-            $logMessage = "Highest Speed: $highestSpeed bytes/second"
-            Add-Content -Path $MeasurementLogFilePath -Value $logMessage
-            $logMessage = "Average Speed: $averageSpeed bytes/second"
-            Add-Content -Path $MeasurementLogFilePath -Value $logMessage
-        }
-
-        # Execution Log: Log script end
-        if ($ExecutionLogFilePath) {
-            $logMessage = "Script end: $(Get-Date)"
-            Add-Content -Path $ExecutionLogFilePath -Value $logMessage
-        }
-
-        # Export results to CSV file if desired
-        if ($PSCmdlet.MyInvocation.BoundParameters['ExportResults']) {
-            $results | Export-Csv -Path $ExportResults -NoTypeInformation
-        }
-
-        # Remove temporary file
-        if ($Credential -and $testFilePath) {
-            Remove-Item -Path $testFilePath -Force -ErrorAction SilentlyContinue
-            Remove-PSDrive -Name "SourceTest" -Force -ErrorAction SilentlyContinue
-        } else {
-            Remove-Item -Path $filePath -Force -ErrorAction SilentlyContinue
-        }
-
-        # Return results
-        $finalResult = [PSCustomObject]@{
-            LowestSpeed = $lowestSpeed
-            HighestSpeed = $highestSpeed
-            AverageSpeed = $averageSpeed
-        }
-
-        # Store results for historical tracking
-        $historicalResult = [PSCustomObject]@{
-            Timestamp = Get-Date
-            SourceServer = $SourceServer
-            DestinationServer = $DestinationServer
-            AverageSpeed = $averageSpeed
-            LowestSpeed = $lowestSpeed
-            HighestSpeed = $highestSpeed
-            Iterations = $Iterations
-            FileSizeMB = $FileSizeMB
-        }
-
-        # Append to historical data
-        $historicalResult | Export-Csv -Path $HistoricalDataPath -Append -NoTypeInformation -Force
-
-        # Compare with historical performance
-        if ($IncludeHistoricalComparison) {
-            $historicalData = Import-Csv $HistoricalDataPath -ErrorAction SilentlyContinue
-            if ($historicalData) {
-                $historicalAvg = $historicalData |
-                    Where-Object { $_.SourceServer -eq $SourceServer -and $_.DestinationServer -eq $DestinationServer } |
-                    Where-Object { $_.Timestamp -ne $historicalResult.Timestamp.ToString() } |
-                    Select-Object -ExpandProperty AverageSpeed |
-
-                if ($historicalAvg) {
-                    $historicalAvgValue = [double]$historicalAvg
+                if ($pastSpeeds.Count -gt 0) {
+                    $historicalAvgValue = ($pastSpeeds | Measure-Object -Average).Average
                     $trend = if ($averageSpeed -gt $historicalAvgValue * 1.1) { "IMPROVED" }
                              elseif ($averageSpeed -lt $historicalAvgValue * 0.9) { "DEGRADED" }
                              else { "STABLE" }
 
-                    $trendMessage = "Performance Trend: $trend (Current: $([math]::Round($averageSpeed/1MB, 2)) MB/s vs Historical Avg: $([math]::Round($historicalAvgValue/1MB, 2)) MB/s)"
-
-                    if ($MeasurementLogFilePath) {
-                        Add-Content -Path $MeasurementLogFilePath -Value $trendMessage
-                    }
-                    Write-Host $trendMessage
+                    Write-ScriptLog -Level Info -Message "Performance Trend: $trend (Current: $([math]::Round($averageSpeed/1MB, 2)) MB/s vs Historical Avg: $([math]::Round($historicalAvgValue/1MB, 2)) MB/s)"
                 }
             }
-        }
 
-        # Generate report if requested
-        if ($GenerateReport) {
-            Generate-TransferSpeedReport -ReportPath $ReportPath -CurrentResult $finalResult -HistoricalPath $HistoricalDataPath
-        }
+            if ($GenerateReport) {
+                Generate-TransferSpeedReport -ReportPath $ReportPath -CurrentResult $finalResult -HistoricalPath $HistoricalDataPath
+            }
 
-        return $finalResult
+            return $finalResult
+        }
+        finally {
+            if ($Credential) {
+                Remove-PSDrive -Name $sourceDriveName -Force -ErrorAction SilentlyContinue
+                Remove-PSDrive -Name $destDriveName -Force -ErrorAction SilentlyContinue
+            }
+            Remove-Item -Path $testFilePath -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $destFilePath -Force -ErrorAction SilentlyContinue
+        }
     }
     catch {
-        $errorMessage = "An error occurred: $_"
-        Write-Error $errorMessage
-
-        # Execution Log: Log error
-        if ($ExecutionLogFilePath) {
-            $logMessage = "Error: $errorMessage"
-            Add-Content -Path $ExecutionLogFilePath -Value $logMessage
-        }
+        Write-ScriptLog -Level Error -Message "An error occurred: $($_.Exception.Message)"
+        throw
     }
 }
 
@@ -245,7 +218,6 @@ function Test-NetworkLatency {
     param(
         [Parameter(Mandatory=$true)]
         [string]$DestinationServer,
-        [PSCredential]$Credential,
         [int]$PingCount = 10
     )
 
@@ -265,7 +237,7 @@ function Test-NetworkLatency {
         AverageLatency = ($pings | Measure-Object -Average).Average
         MinLatency = ($pings | Measure-Object -Minimum).Minimum
         MaxLatency = ($pings | Measure-Object -Maximum).Maximum
-        PacketLoss = ((10 - $pings.Count) / 10) * 100
+        PacketLoss = [math]::Round(((($PingCount - $pings.Count) / $PingCount) * 100), 2)
     }
 }
 
@@ -277,17 +249,20 @@ function Measure-MultiPathTransfer {
         [Parameter(Mandatory=$true)]
         [string[]]$DestinationServers,
         [int]$FileSizeMB = 100,
+        [int]$Iterations = 1,
         [PSCredential]$Credential
     )
 
     $results = @()
+    $index = 0
     foreach ($dest in $DestinationServers) {
+        $index++
         Write-Progress -Activity "Testing Multi-Path Transfer" -Status "Testing: $dest" `
-            -PercentComplete (($DestinationServers.IndexOf($dest) + 1) / $DestinationServers.Count * 100)
+            -PercentComplete (($index / $DestinationServers.Count) * 100)
 
         try {
             $result = Measure-TransferSpeed -SourceServer $SourceServer -DestinationServer $dest `
-                -FileSizeMB $FileSizeMB -Credential $Credential -ErrorAction Stop
+                -FileSizeMB $FileSizeMB -Iterations $Iterations -Credential $Credential -ErrorAction Stop
 
             $results += [PSCustomObject]@{
                 Destination = $dest
@@ -300,16 +275,17 @@ function Measure-MultiPathTransfer {
         catch {
             $results += [PSCustomObject]@{
                 Destination = $dest
-                SpeedMBps = "ERROR"
-                LowestSpeedMBps = "ERROR"
-                HighestSpeedMBps = "ERROR"
+                SpeedMBps = $null
+                LowestSpeedMBps = $null
+                HighestSpeedMBps = $null
                 Status = "FAILED"
                 Error = $_.Exception.Message
             }
         }
     }
 
-    return $results | Sort-Object SpeedMBps -Descending
+    Write-Progress -Activity "Testing Multi-Path Transfer" -Completed
+    return $results
 }
 
 function Measure-TransferSpeedWithThrottling {
@@ -320,7 +296,8 @@ function Measure-TransferSpeedWithThrottling {
         [Parameter(Mandatory=$true)]
         [string]$DestinationServer,
         [int]$FileSizeMB = 100,
-        [int]$BandwidthLimitMbps,
+        [ValidateRange(1, 100000)]
+        [int]$BandwidthLimitMbps = 100,
         [PSCredential]$Credential
     )
 
@@ -340,22 +317,35 @@ function Measure-TransferSpeedWithThrottling {
 
     return [PSCustomObject]@{
         ExpectedTime = $expectedTime
-        ActualTime = ($FileSizeMB * 8) / $actualSpeedMBps
+        ActualTime = if ($actualSpeedMBps -gt 0) { ($FileSizeMB * 8) / $actualSpeedMBps } else { $null }
         ExpectedSpeed = $BandwidthLimitMbps
         ActualSpeedMBps = $actualSpeedMBps
         EfficiencyPercent = $efficiency
     }
 }
 
+function ConvertTo-HtmlEncoded {
+    [CmdletBinding()]
+    param([string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) {
+        return ''
+    }
+
+    return $Value -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;' -replace "'", '&#39;'
+}
+
 function Generate-TransferSpeedReport {
     [CmdletBinding()]
     param(
+        [Parameter(Mandatory=$true)]
         [string]$ReportPath,
+        [Parameter(Mandatory=$true)]
         [PSCustomObject]$CurrentResult,
-        [string]$HistoricalPath
+        [string]$HistoricalPath = "$env:USERPROFILE\TransferSpeedHistory.csv"
     )
 
-    $historicalData = if (Test-Path $HistoricalPath) { Import-Csv $HistoricalPath } else { @() }
+    $historicalData = if (Test-Path $HistoricalPath) { @(Import-Csv $HistoricalPath) } else { @() }
 
     $html = @"
 <!DOCTYPE html>
@@ -414,12 +404,14 @@ function Generate-TransferSpeedReport {
         $timestamp = [DateTime]$entry.Timestamp
         $speed = [double]$entry.AverageSpeed
         $trend = if ($speed -gt 10MB) { '<span class="fast">FAST</span>' } else { '<span class="slow">SLOW</span>' }
+        $src = ConvertTo-HtmlEncoded -Value $entry.SourceServer
+        $dst = ConvertTo-HtmlEncoded -Value $entry.DestinationServer
 
         $html += @"
             <tr>
                 <td>$($timestamp.ToString('yyyy-MM-dd HH:mm'))</td>
-                <td>$($entry.SourceServer)</td>
-                <td>$($entry.DestinationServer)</td>
+                <td>$src</td>
+                <td>$dst</td>
                 <td>$([math]::Round($speed/1MB, 2))</td>
                 <td>$trend</td>
             </tr>
@@ -436,3 +428,34 @@ function Generate-TransferSpeedReport {
     $html | Out-File -FilePath $ReportPath -Force
     Write-Host "Report generated: $ReportPath"
 }
+
+# ---- Main ----
+
+if ($MultiPathTest -and $DestinationServers.Count -gt 0) {
+    if (-not $SourceServer) {
+        Write-ScriptLog -Level Error -Message "Multi-path test requires -SourceServer."
+        exit 1
+    }
+    Measure-MultiPathTransfer -SourceServer $SourceServer -DestinationServers $DestinationServers `
+        -FileSizeMB $FileSizeMB -Iterations $Iterations -Credential $Credential
+    exit 0
+}
+
+if (-not $SourceServer -or -not $DestinationServer) {
+    Write-ScriptLog -Level Error -Message "Specify -SourceServer and -DestinationServer (or -SourceServer with -DestinationServers and -MultiPathTest)."
+    exit 1
+}
+
+$result = Measure-TransferSpeed -SourceServer $SourceServer -DestinationServer $DestinationServer `
+    -FileSizeMB $FileSizeMB -Iterations $Iterations -Credential $Credential `
+    -HistoricalDataPath $HistoricalDataPath -IncludeHistoricalComparison:$IncludeHistoricalComparison `
+    -GenerateReport:$GenerateReport -ReportPath $ReportPath
+
+if ($result) {
+    Write-Host -Object ""
+    Write-Host -Object "Results: Average $([math]::Round($result.AverageSpeed/1MB,2)) MB/s, " `
+        "Lowest $([math]::Round($result.LowestSpeed/1MB,2)) MB/s, " `
+        "Highest $([math]::Round($result.HighestSpeed/1MB,2)) MB/s"
+}
+
+exit 0

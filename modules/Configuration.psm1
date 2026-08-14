@@ -1,13 +1,15 @@
-<#
+﻿<#
 .SYNOPSIS
     Centralized configuration management for PowerShell scripts
 
 .DESCRIPTION
     Provides unified configuration management across all scripts with support for
     default configurations, environment-specific overrides, and persistence.
+    Configuration is stored as CliXML in a well-known location; missing files
+    and unwritable directories are handled gracefully.
 
 .NOTES
-    Version: 1.0
+    Version: 3.0.0
     Author: Cláudio Gonçalves
 #>
 
@@ -17,28 +19,39 @@ function Initialize-ScriptConfiguration {
         [string]$ConfigPath = "$env:ProgramData\PowerShellScripts\ScriptConfig.xml",
         [hashtable]$DefaultConfig
     )
-    
+
     $configDir = Split-Path -Parent $ConfigPath
     if (-not (Test-Path $configDir)) {
-        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        try {
+            New-Item -ItemType Directory -Path $configDir -Force -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-Warning "Could not create configuration directory '$configDir': $($_.Exception.Message)"
+        }
     }
-    
-    $script:Configuration = if (Test-Path $ConfigPath) {
-        Import-Clixml $ConfigPath
+
+    $global:ScriptConfiguration = if (Test-Path $ConfigPath) {
+        try {
+            Import-Clixml $ConfigPath -ErrorAction Stop
+        }
+        catch {
+            Write-Warning "Could not read configuration file '$ConfigPath': $($_.Exception.Message)"
+            @{}
+        }
     } else {
         @{}
     }
-    
+
     if ($DefaultConfig) {
         foreach ($key in $DefaultConfig.Keys) {
-            if (-not $script:Configuration.ContainsKey($key)) {
-                $script:Configuration[$key] = $DefaultConfig[$key]
+            if (-not $global:ScriptConfiguration.ContainsKey($key)) {
+                $global:ScriptConfiguration[$key] = $DefaultConfig[$key]
             }
         }
     }
-    
+
     Save-ScriptConfiguration -ConfigPath $ConfigPath
-    return $script:Configuration
+    return $global:ScriptConfiguration
 }
 
 function Get-ScriptConfiguration {
@@ -47,20 +60,19 @@ function Get-ScriptConfiguration {
         [string]$Key,
         $DefaultValue = $null
     )
-    
-    if (-not $script:Configuration -or $script:Configuration.Count -eq 0) {
-        Initialize-ScriptConfiguration
+
+    if (-not $global:ScriptConfiguration -or $global:ScriptConfiguration.Count -eq 0) {
+        Initialize-ScriptConfiguration | Out-Null
     }
-    
+
     if ($Key) {
-        if ($script:Configuration.ContainsKey($Key)) {
-            return $script:Configuration[$Key]
-        } else {
-            return $DefaultValue
+        if ($global:ScriptConfiguration.ContainsKey($Key)) {
+            return $global:ScriptConfiguration[$Key]
         }
-    } else {
-        return $script:Configuration
+        return $DefaultValue
     }
+
+    return $global:ScriptConfiguration
 }
 
 function Set-ScriptConfiguration {
@@ -72,12 +84,12 @@ function Set-ScriptConfiguration {
         $Value,
         [string]$ConfigPath = "$env:ProgramData\PowerShellScripts\ScriptConfig.xml"
     )
-    
-    if (-not $script:Configuration -or $script:Configuration.Count -eq 0) {
-        Initialize-ScriptConfiguration -ConfigPath $ConfigPath
+
+    if (-not $global:ScriptConfiguration -or $global:ScriptConfiguration.Count -eq 0) {
+        Initialize-ScriptConfiguration -ConfigPath $ConfigPath | Out-Null
     }
-    
-    $script:Configuration[$Key] = $Value
+
+    $global:ScriptConfiguration[$Key] = $Value
     Save-ScriptConfiguration -ConfigPath $ConfigPath
 }
 
@@ -86,9 +98,16 @@ function Save-ScriptConfiguration {
     param(
         [string]$ConfigPath = "$env:ProgramData\PowerShellScripts\ScriptConfig.xml"
     )
-    
-    if ($script:Configuration) {
-        $script:Configuration | Export-Clixml -Path $ConfigPath -Force
+
+    if (-not $global:ScriptConfiguration) {
+        return
+    }
+
+    try {
+        $global:ScriptConfiguration | Export-Clixml -Path $ConfigPath -Force -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Could not save configuration file '$ConfigPath': $($_.Exception.Message)"
     }
 }
 
@@ -130,3 +149,11 @@ function Get-DefaultConfiguration {
         }
     }
 }
+
+Export-ModuleMember -Function @(
+    'Initialize-ScriptConfiguration',
+    'Get-ScriptConfiguration',
+    'Set-ScriptConfiguration',
+    'Save-ScriptConfiguration',
+    'Get-DefaultConfiguration'
+)

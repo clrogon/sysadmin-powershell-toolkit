@@ -1,200 +1,204 @@
-<#
+﻿<#
 .SYNOPSIS
-This script identifies duplicate files in a given directory and performs specified actions on the duplicates.
+    Identifies duplicate files in a directory (or across directories) and can
+    delete or move the duplicates.
 
 .DESCRIPTION
-The script uses SHA256 hashing by default to identify duplicates but can use other algorithms as well. It also logs events and can export the list of duplicate files to a CSV file. Enhanced with intelligent resolution strategies, HTML reports, and multi-directory comparison.
-
-.PARAMETERS
-- targetDir: The directory to scan for duplicate files. Default is 'C:\Default\Path'.
-- hashAlgorithm: The hash algorithm to use for identifying duplicates. Default is 'SHA256'.
-- exportPath: Path to the CSV file where the list of duplicates will be saved. Default is '.\duplicate_files.csv'.
-- logPath: Path to the log file where events will be logged. Default is '.\file_operations.log'.
-- excludeDirs: Array of directories to exclude from scanning. Default is an empty array.
-- excludeFileTypes: Array of file types to exclude from scanning. Default is an empty array.
-- userConfirm: The action to perform on duplicates. Options are 'None', 'Delete', or 'Move'. Default is 'None'.
-- movePath: The directory where duplicates will be moved if the userConfirm parameter is set to 'Move'. Default is 'C:\DuplicateFiles'.
-- resolutionStrategy: Strategy for intelligent resolution (Newest, Largest, MostAccessed, KeepAll). Default is 'Newest'.
-- reportPath: Path to HTML report output. Default is 'DuplicateReport.html'.
-- generateReport: Generate HTML report. Default is false.
+    Uses SHA256 hashing (configurable) to find duplicate files. Supports
+    exclusion lists, CSV export, intelligent resolution strategies, HTML
+    reports, and cross-directory comparison.
 
 .EXAMPLE
-Find-DuplicateFiles -targetDir 'C:\MyFiles' -hashAlgorithm 'SHA256' -resolutionStrategy Newest -generateReport
+    .\Find-DuplicateFiles.ps1 -targetDir 'C:\MyFiles' -resolutionStrategy Newest -generateReport
 
 .EXAMPLE
-Find-DuplicateFiles -targetDir 'C:\MyFiles' -hashAlgorithm 'SHA256' -userConfirm 'Delete' -Simulate
+    .\Find-DuplicateFiles.ps1 -targetDir 'C:\MyFiles' -userConfirm 'Delete' -Simulate
 
-.INPUTS
-- targetDir: String
-- hashAlgorithm: 'SHA256', 'SHA1', 'SHA384', 'SHA512', etc.
-- exportPath: String
-- logPath: String
-- excludeDirs: Array of strings
-- excludeFileTypes: Array of strings
-- userConfirm: String ('None', 'Delete', 'Move')
-- movePath: String
+.PARAMETER targetDir
+    Directory to scan for duplicate files.
 
-.OUTPUTS
-- Duplicate files will be acted upon as per the userConfirm parameter.
-- A CSV file containing the list of duplicates.
-- A log file containing events.
-- HTML report if generateReport is enabled.
+.PARAMETER hashAlgorithm
+    Hash algorithm used to identify duplicates (SHA256 default).
+
+.PARAMETER exportPath
+    Path to the CSV file where the duplicate list is saved.
+
+.PARAMETER excludeDirs
+    Directories to exclude from the scan.
+
+.PARAMETER excludeFileTypes
+    File extensions to exclude (e.g. @('.tmp', '.log')).
+
+.PARAMETER userConfirm
+    Action on duplicates: None, Delete, or Move.
+
+.PARAMETER movePath
+    Destination for moved duplicates.
+
+.PARAMETER resolutionStrategy
+    Strategy for Resolve-DuplicatesIntelligently: Newest, Largest, MostAccessed, KeepAll.
+
+.PARAMETER reportPath
+    Path for the HTML report.
+
+.PARAMETER generateReport
+    Generate an HTML report.
+
+.PARAMETER Simulate
+    Show what would happen without changing any files.
 
 .NOTES
-File Name: Find-DuplicateFiles.ps1
-Author: Cláudio Gonçalves
-Version: 3.0
+    Version: 3.0
+    Author: Claudio Gonçalves
 #>
 
 #Requires -Version 5.1
 
-Import-Module "$PSScriptRoot\..\modules\Configuration.psm1" -Force
-Import-Module "$PSScriptRoot\..\modules\Logging.psm1" -Force
+[CmdletBinding()]
+param(
+    [string]$targetDir = (Get-Location).Path,
+    [ValidateSet('SHA256', 'SHA1', 'SHA384', 'SHA512', 'MD5')]
+    [string]$hashAlgorithm = 'SHA256',
+    [string]$exportPath = '.\duplicate_files.csv',
+    [array]$excludeDirs = @(),
+    [array]$excludeFileTypes = @(),
+    [ValidateSet('None', 'Delete', 'Move')]
+    [string]$userConfirm = 'None',
+    [string]$movePath = 'C:\DuplicateFiles',
+    [ValidateSet('Newest', 'Largest', 'MostAccessed', 'KeepAll')]
+    [string]$resolutionStrategy = 'Newest',
+    [string]$reportPath = '.\DuplicateReport.html',
+    [switch]$generateReport,
+    [switch]$Simulate
+)
+
+Import-Module "$PSScriptRoot\..\modules\ErrorHandling.psm1" -Force
 
 Initialize-ScriptConfiguration -DefaultConfig (Get-DefaultConfiguration)
 Initialize-Logging -Component "Find-DuplicateFiles"
 
-# Function to Calculate File Hash with exception handling
-function Get-FileHashValue ($filePath, $algorithm = 'MD5') {
-    try {
-        # Calculate and return the hash of the file
-        $hash = Get-FileHash -Path $filePath -Algorithm $algorithm
-        return $hash.Hash
-    } catch {
-        # Log and display a warning if hashing fails
-        Write-Warning "Failed to hash $filePath using $algorithm"
-        Log-Event "Failed to hash $filePath using $algorithm" $logPath
-        return $null
-    }
-}
-
-# Logging Function with timestamp
-function Log-Event ($message, $logPath) {
-    # Get the current date and time
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    # Add the log entry to the log file
-    Add-Content -Path $logPath -Value "[$timestamp] $message"
-}
-
-# Function to validate and sanitize paths to prevent path traversal attacks
 function Test-ValidPath {
+    [CmdletBinding()]
     param([string]$Path)
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        Write-Error "Path cannot be null or empty."
         return $false
     }
 
-    # Check for path traversal attempts
     if ($Path -match '\.\.') {
-        Write-Error "Path contains directory traversal sequences."
+        Write-ScriptLog -Level Warning -Message "Path contains directory traversal sequences: $Path"
         return $false
     }
 
-    # Validate the path format
     try {
-        $resolvedPath = Resolve-Path -Path $Path -ErrorAction Stop
+        [void][System.IO.Path]::GetFullPath($Path)
         return $true
     }
     catch {
-        Write-Error "Invalid path format: $Path"
+        Write-ScriptLog -Level Warning -Message "Invalid path format: $Path"
         return $false
     }
 }
 
-# Function to validate file extension
 function Test-ValidExtension {
+    [CmdletBinding()]
     param([string]$Extension)
 
     if ([string]::IsNullOrWhiteSpace($Extension)) {
         return $false
     }
 
-    # Only allow valid file extensions (alphanumeric with dot)
     if ($Extension -notmatch '^\.[a-zA-Z0-9]+$') {
-        Write-Error "Invalid file extension: $Extension"
+        Write-ScriptLog -Level Warning -Message "Invalid file extension: $Extension"
         return $false
     }
 
     return $true
 }
 
-# Main Function for Finding Duplicate Files
+function Get-FileHashValue {
+    [CmdletBinding()]
+    param(
+        [string]$FilePath,
+        [string]$Algorithm = 'SHA256'
+    )
+
+    try {
+        $hash = Get-FileHash -Path $FilePath -Algorithm $Algorithm -ErrorAction Stop
+        return $hash.Hash
+    }
+    catch {
+        Write-ScriptLog -Level Warning -Message "Failed to hash $FilePath using ${Algorithm}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
 function Find-DuplicateFiles {
     [CmdletBinding()]
     param (
-        # Define function parameters with default values
-        [string]$targetDir = 'C:\Default\Path',
-        [ValidateSet('SHA256','SHA1','SHA384','SHA512','MD5')]
+        [string]$targetDir = (Get-Location).Path,
+        [ValidateSet('SHA256', 'SHA1', 'SHA384', 'SHA512', 'MD5')]
         [string]$hashAlgorithm = 'SHA256',
         [string]$exportPath = '.\duplicate_files.csv',
-        [string]$logPath = '.\file_operations.log',
         [array]$excludeDirs = @(),
         [array]$excludeFileTypes = @(),
+        [ValidateSet('None', 'Delete', 'Move')]
         [string]$userConfirm = 'None',
-        [string]$movePath = 'C:\DuplicateFiles'
+        [string]$movePath = 'C:\DuplicateFiles',
+        [ValidateSet('Newest', 'Largest', 'MostAccessed', 'KeepAll')]
+        [string]$resolutionStrategy = 'Newest',
+        [string]$reportPath = '.\DuplicateReport.html',
+        [switch]$generateReport,
+        [switch]$Simulate
     )
 
-    # Validate if target directory exists
-    if (-Not (Test-Path $targetDir)) {
-        Write-Warning "Target directory not found: $targetDir"
-        Log-Event "Target directory not found: $targetDir" $logPath
+    if (-not (Test-Path $targetDir)) {
+        Write-ScriptLog -Level Error -Message "Target directory not found: $targetDir"
         return
     }
 
-    # Validate if the directory for the export path exists
-    if (-Not (Test-Path (Split-Path -Parent $exportPath))) {
-        Write-Warning "Export path directory not found: $exportPath"
-        Log-Event "Export path directory not found: $exportPath" $logPath
-        return
-    }
-
-    # Initialize variables
-    $confirmAll = $false # To track if user has chosen to confirm for all
-    $hashTable = @{}
-    $duplicates = @()
-
-    # Validate target directory path to prevent path traversal
     if (-not (Test-ValidPath -Path $targetDir)) {
-        Write-Error "Invalid target directory path: $targetDir"
-        Log-Event "Invalid target directory path: $targetDir" $logPath
+        Write-ScriptLog -Level Error -Message "Invalid target directory path: $targetDir"
         return
     }
 
-    # Resolve the path to get absolute path
-    $targetDir = Resolve-Path -Path $targetDir -ErrorAction Stop
+    $targetDir = (Resolve-Path -Path $targetDir -ErrorAction Stop).Path
 
-    # Validate move path if specified
-    if ($userConfirm -eq 'Move' -and -not (Test-ValidPath -Path $movePath)) {
-        Write-Error "Invalid move path: $movePath"
-        Log-Event "Invalid move path: $movePath" $logPath
-        return
-    }
-
-    # Validate exclude file types
-    foreach ($ext in $excludeFileTypes) {
-        if (-not (Test-ValidExtension -Extension $ext)) {
-            Write-Error "Invalid file extension in exclusion list: $ext"
+    if ($userConfirm -eq 'Move' -and -not (Test-Path $movePath)) {
+        try {
+            New-Item -ItemType Directory -Path $movePath -Force -ErrorAction Stop | Out-Null
+        }
+        catch {
+            Write-ScriptLog -Level Error -Message "Could not create move path '$movePath': $($_.Exception.Message)"
             return
         }
     }
 
-    # Iterate through the files in the target directory
-    $files = Get-ChildItem -Path $targetDir -Recurse -File
+    foreach ($ext in $excludeFileTypes) {
+        if (-not (Test-ValidExtension -Extension $ext)) {
+            Write-ScriptLog -Level Error -Message "Invalid file extension in exclusion list: $ext"
+            return
+        }
+    }
+
+    $confirmAll = $false
+    $hashTable = @{}
+    $duplicates = @()
+
+    Write-ScriptLog -Level Info -Message "Scanning $targetDir with $hashAlgorithm"
+
+    $files = Get-ChildItem -Path $targetDir -Recurse -File -ErrorAction SilentlyContinue
 
     foreach ($file in $files) {
-        # Skip the files or directories that are in the exclusion lists
         if ($excludeDirs -contains $file.DirectoryName -or $excludeFileTypes -contains $file.Extension) {
             continue
         }
 
-        # Generate hash for each file
-        $hashValue = Get-FileHashValue -filePath $file.FullName -algorithm $hashAlgorithm
-        if ($hashValue -eq $null) {
+        $hashValue = Get-FileHashValue -FilePath $file.FullName -Algorithm $hashAlgorithm
+        if ($null -eq $hashValue) {
             continue
         }
 
-        # Check if this is a duplicate
         if ($hashTable.ContainsKey($hashValue)) {
             $original = $hashTable[$hashValue]
             $duplicateObject = [PSCustomObject]@{
@@ -202,45 +206,57 @@ function Find-DuplicateFiles {
                 Duplicate = $file.FullName
             }
 
-            # Add to duplicates list and log the event
             $duplicates += $duplicateObject
-            Log-Event "Duplicate found: $($file.FullName) is a duplicate of $original with hash $hashValue" $logPath
+            Write-ScriptLog -Level Info -Message "Duplicate found: $($file.FullName) is a duplicate of $original"
 
-            # Ask for user confirmation if needed
             if ($userConfirm -eq 'Delete' -or $userConfirm -eq 'Move') {
                 $confirm = if ($confirmAll) { 'y' } else {
-                    # Ask for confirmation
                     do {
                         $confirm = Read-Host "Confirm action ($userConfirm) on duplicate $($file.FullName)? (y/n/a for all)"
                     } until ($confirm -eq 'y' -or $confirm -eq 'n' -or $confirm -eq 'a')
 
                     if ($confirm -eq 'a') { $confirmAll = $true }
+                    $confirm
                 }
 
-                # Perform action based on confirmation
                 if ($confirm -eq 'y' -or $confirmAll) {
-                    if ($userConfirm -eq 'Delete') {
-                        Remove-Item -Path $file.FullName
-                        Log-Event "Duplicate deleted: $($file.FullName)" $logPath
-                    } elseif ($userConfirm -eq 'Move') {
-                        Move-Item -Path $file.FullName -Destination $movePath
-                        Log-Event "Duplicate moved: $($file.FullName) to $movePath" $logPath
+                    if ($Simulate) {
+                        Write-ScriptLog -Level Info -Message "[SIMULATE] Would $userConfirm $($file.FullName)"
+                    }
+                    elseif ($userConfirm -eq 'Delete') {
+                        Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue
+                        Write-ScriptLog -Level Info -Message "Duplicate deleted: $($file.FullName)"
+                    }
+                    elseif ($userConfirm -eq 'Move') {
+                        Move-Item -Path $file.FullName -Destination $movePath -Force -ErrorAction SilentlyContinue
+                        Write-ScriptLog -Level Info -Message "Duplicate moved: $($file.FullName) to $movePath"
                     }
                 }
             }
-        } else {
-            # Add the file hash to the hash table
+        }
+        else {
             $hashTable[$hashValue] = $file.FullName
         }
     }
 
-    # Export list of duplicates to CSV
-    $duplicates | Export-Csv -Path $exportPath -NoTypeInformation
+    $exportDir = Split-Path -Parent $exportPath
+    if ($exportDir -and -not (Test-Path $exportDir)) {
+        New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+    }
 
-    # Generate report if requested
+    if ($duplicates.Count -gt 0) {
+        $duplicates | Export-Csv -Path $exportPath -NoTypeInformation
+        Write-ScriptLog -Level Info -Message "Exported $($duplicates.Count) duplicates to $exportPath"
+    }
+    else {
+        Write-ScriptLog -Level Info -Message "No duplicates found in $targetDir"
+    }
+
     if ($generateReport) {
         Generate-DuplicateReport -Duplicates $duplicates -ReportPath $reportPath -TargetDir $targetDir
     }
+
+    return $duplicates
 }
 
 function Get-FileAccessCount {
@@ -251,9 +267,6 @@ function Get-FileAccessCount {
     )
 
     try {
-        $file = Get-Item $FilePath
-        $accessCount = 0
-
         $events = Get-WinEvent -FilterHashtable @{
             LogName = 'Security'
             ID = 4663, 4656, 4658
@@ -262,9 +275,7 @@ function Get-FileAccessCount {
             $_.Message -like "*$FilePath*"
         }
 
-        $accessCount = $events.Count
-
-        return $accessCount
+        return @($events).Count
     }
     catch {
         return 0
@@ -279,12 +290,16 @@ function Resolve-DuplicatesIntelligently {
         [ValidateSet('Newest', 'Largest', 'MostAccessed', 'KeepAll')]
         [string]$ResolutionStrategy = 'Newest',
         [switch]$Simulate,
-        [string]$MovePath = 'C:\DuplicateFiles',
-        [string]$logPath = '.\file_operations.log'
+        [string]$MovePath = 'C:\DuplicateFiles'
     )
 
     $resolvedCount = 0
     $skippedCount = 0
+
+    if ($ResolutionStrategy -eq 'KeepAll') {
+        Write-ScriptLog -Level Info -Message "KeepAll strategy selected; no files will be removed."
+        return
+    }
 
     foreach ($dup in $Duplicates) {
         try {
@@ -314,8 +329,8 @@ function Resolve-DuplicatesIntelligently {
                     }
                 }
                 'MostAccessed' {
-                    $origAccessed = Get-FileAccessCount -Path $dup.Original
-                    $dupAccessed = Get-FileAccessCount -Path $dup.Duplicate
+                    $origAccessed = Get-FileAccessCount -FilePath $dup.Original
+                    $dupAccessed = Get-FileAccessCount -FilePath $dup.Duplicate
 
                     if ($dupAccessed -gt $origAccessed) {
                         $keep = $dup.Duplicate
@@ -333,22 +348,30 @@ function Resolve-DuplicatesIntelligently {
 
             if (-not $Simulate) {
                 Remove-Item $remove -Force -ErrorAction Stop
-                Log-Event "Removed duplicate: $remove (kept: $keep) - Strategy: $ResolutionStrategy" $logPath
-                $resolvedCount++
-            } else {
-                $resolvedCount++
+                Write-ScriptLog -Level Info -Message "Removed duplicate: $remove (kept: $keep) - Strategy: $ResolutionStrategy"
             }
+            $resolvedCount++
         }
         catch {
-            Write-Warning "Failed to process duplicate pair: $_"
+            Write-ScriptLog -Level Warning -Message "Failed to process duplicate pair: $($_.Exception.Message)"
             $skippedCount++
-            Log-Event "Failed to process duplicate: $($_.Exception.Message)" $logPath
         }
     }
 
     Write-Host "`nResolution Summary:"
     Write-Host "  Resolved: $resolvedCount files"
     Write-Host "  Skipped: $skippedCount files"
+}
+
+function ConvertTo-HtmlEncoded {
+    [CmdletBinding()]
+    param([string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) {
+        return ''
+    }
+
+    return $Value -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;' -replace "'", '&#39;'
 }
 
 function Generate-DuplicateReport {
@@ -361,8 +384,8 @@ function Generate-DuplicateReport {
         [string]$TargetDir
     )
 
-    $totalDuplicates = $Duplicates.Count
-    $totalSizeSaved = ($Duplicates | ForEach-Object {
+    $totalDuplicates = @($Duplicates).Count
+    $totalSizeSaved = (@($Duplicates) | ForEach-Object {
         try {
             (Get-Item $_.Duplicate -ErrorAction SilentlyContinue).Length
         } catch { 0 }
@@ -422,35 +445,37 @@ function Generate-DuplicateReport {
                 <th>Duplicate File</th>
                 <th>Size (MB)</th>
                 <th>Hash Preview</th>
-                <th>Action</th>
             </tr>
 "@
 
-    $displayDuplicates = $Duplicates | Select-Object -First 100
+    $displayDuplicates = @($Duplicates | Select-Object -First 100)
 
     foreach ($dup in $displayDuplicates) {
         try {
             $sizeMB = [math]::Round((Get-Item $dup.Duplicate -ErrorAction SilentlyContinue).Length/1MB, 2)
-            $hash = Get-FileHashValue -filePath $dup.Original -algorithm 'SHA256'
-            $hashPreview = if ($hash) { $hash.Substring(0,16) } else { "N/A" }
+            $hash = Get-FileHashValue -FilePath $dup.Original -Algorithm 'SHA256'
+            $hashPreview = if ($hash) { $hash.Substring(0, [math]::Min(16, $hash.Length)) } else { "N/A" }
 
             $badgeClass = if ($sizeMB -gt 100) { 'badge-danger' } elseif ($sizeMB -gt 10) { 'badge-warning' } else { '' }
             $badge = if ($badgeClass) { "<span class='badge $badgeClass'>Large</span>" } else { '' }
 
+            $origEncoded = ConvertTo-HtmlEncoded -Value $dup.Original
+            $dupEncoded = ConvertTo-HtmlEncoded -Value $dup.Duplicate
+            $hashEncoded = ConvertTo-HtmlEncoded -Value $hashPreview
+
             $html += @"
             <tr class="highlight">
-                <td style="word-break: break-all;">$($dup.Original)</td>
-                <td style="word-break: break-all;">$($dup.Duplicate)</td>
+                <td style="word-break: break-all;">$origEncoded</td>
+                <td style="word-break: break-all;">$dupEncoded</td>
                 <td>$sizeMB $badge</td>
-                <td style="font-family: monospace;">$hashPreview...</td>
-                <td><a href="$($dup.Duplicate)" class="badge" style="background: #667eea; color: white; text-decoration: none;">Open</a></td>
+                <td style="font-family: monospace;">$hashEncoded...</td>
             </tr>
 "@
         }
         catch {
             $html += @"
             <tr>
-                <td colspan="5" style="color: red;">Error processing file: $($_.Exception.Message)</td>
+                <td colspan="4" style="color: red;">Error processing file: $(ConvertTo-HtmlEncoded -Value $_.Exception.Message)</td>
             </tr>
 "@
         }
@@ -479,15 +504,22 @@ function Compare-MultipleDirectories {
     $hashTable = @{}
     $crossDirectoryDuplicates = @()
 
+    $index = 0
     foreach ($dir in $Directories) {
+        $index++
         Write-Progress -Activity "Scanning directories" -Status "Processing: $dir" `
-            -PercentComplete (($Directories.IndexOf($dir) + 1) / $Directories.Count * 100)
+            -PercentComplete (($index / $Directories.Count) * 100)
+
+        if (-not (Test-Path $dir)) {
+            Write-ScriptLog -Level Warning -Message "Directory not found, skipping: $dir"
+            continue
+        }
 
         $files = Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue
 
         foreach ($file in $files) {
             try {
-                $hash = Get-FileHashValue -filePath $file.FullName -algorithm 'SHA256'
+                $hash = Get-FileHashValue -FilePath $file.FullName -Algorithm 'SHA256'
 
                 if ($hash -and $hashTable.ContainsKey($hash)) {
                     $existing = $hashTable[$hash]
@@ -501,7 +533,8 @@ function Compare-MultipleDirectories {
                             SizeMB = [math]::Round($file.Length/1MB, 2)
                         }
                     }
-                } else {
+                }
+                elseif ($hash) {
                     $hashTable[$hash] = @{
                         FullPath = $file.FullName
                         Directory = $dir
@@ -509,10 +542,12 @@ function Compare-MultipleDirectories {
                 }
             }
             catch {
-                Write-Warning "Failed to hash $($file.FullName): $_"
+                Write-ScriptLog -Level Warning -Message "Failed to hash $($file.FullName): $($_.Exception.Message)"
             }
         }
     }
+
+    Write-Progress -Activity "Scanning directories" -Completed
 
     $crossDirectoryDuplicates | Export-Csv -Path $ExportPath -NoTypeInformation
     Write-Host "Found $($crossDirectoryDuplicates.Count) cross-directory duplicates"
@@ -546,6 +581,7 @@ function Analyze-DuplicatesByFileType {
             $fileTypeStats[$ext].TotalSize += $size
         }
         catch {
+            Write-Debug "Could not inspect file '$($file.FullName)': $($_.Exception.Message)"
         }
     }
 
@@ -554,7 +590,18 @@ function Analyze-DuplicatesByFileType {
             FileType = $_.Key
             Count = $_.Value.Count
             TotalSizeMB = [math]::Round($_.Value.TotalSize/1MB, 2)
-            AvgSizeMB = [math]::Round($_.Value.TotalSize/1MB/$_.Value.Count, 2)
+            AvgSizeMB = if ($_.Value.Count -gt 0) { [math]::Round($_.Value.TotalSize/1MB/$_.Value.Count, 2) } else { 0 }
         }
     } | Sort-Object TotalSizeMB -Descending | Format-Table -AutoSize
+}
+
+# ---- Main ----
+
+$duplicates = Find-DuplicateFiles -targetDir $targetDir -hashAlgorithm $hashAlgorithm `
+    -exportPath $exportPath -excludeDirs $excludeDirs -excludeFileTypes $excludeFileTypes `
+    -userConfirm $userConfirm -movePath $movePath -resolutionStrategy $resolutionStrategy `
+    -reportPath $reportPath -generateReport:$generateReport -Simulate:$Simulate
+
+if ($duplicates.Count -gt 0 -and $PSBoundParameters.ContainsKey('resolutionStrategy')) {
+    Resolve-DuplicatesIntelligently -Duplicates $duplicates -ResolutionStrategy $resolutionStrategy -Simulate:$Simulate
 }

@@ -1,52 +1,68 @@
 name: CI
+
 on:
   push:
+    branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: windows-latest
+  validate:
+    name: PSScriptAnalyzer + Pester (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # PowerShell is available on Windows runners by default
-
-      - name: Install Pester
+      - name: Install PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module -Name Pester -Scope CurrentUser -Force -SkipPublisherCheck
-          Import-Module Pester
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          Import-Module PSScriptAnalyzer
 
-      - name: Run unit tests (Pester)
+      - name: Parse check (all .ps1/.psm1/.psd1 files)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Import-Module .\modules\Configuration.psm1
-          Import-Module .\modules\Logging.psm1
-          Import-Module .\modules\ErrorHandling.psm1
-          if (Test-Path .\tests) { Invoke-Pester -Path .\tests } else { Invoke-Pester -Path .\tests -Quiet }
-
-      - name: Install PSScriptAnalyzer & run (optional security checks)
-        shell: pwsh
-        run: |
-          try {
-            Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -SkipPublisherCheck
-            Import-Module PSScriptAnalyzer
-            if (Test-Path .\PSScriptAnalyzerSettings.psd1) {
-              Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
-            } else {
-              Invoke-ScriptAnalyzer -Path . -Recurse
+          $files = Get-ChildItem -Path . -Recurse -Include '*.ps1', '*.psm1', '*.psd1' -File
+          $failed = 0
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed++
+              Write-Host "PARSE ERROR in $($file.FullName):"
+              $errors | ForEach-Object { Write-Host "  $($_.Extent.StartLineNumber): $($_.Message)" }
             }
-          } catch { Write-Warning "PSScriptAnalyzer not available: $_" }
-
-      - name: Sign scripts (optional)
-        shell: pwsh
-        env:
-          CODE_SIGN_THUMBPRINT: ${{ secrets.CODE_SIGN_THUMBPRINT }}
-        run: |
-          if (Test-Path ./signing/Sign-Scripts.ps1) {
-            try {
-              & (Resolve-Path ./signing/Sign-Scripts.ps1) -Paths (Get-ChildItem -Path . -Recurse -Include '*.ps1','*.psm1' -File | Select-Object -Expand FullName) -Thumbprint $env:CODE_SIGN_THUMBPRINT
-            } catch { Write-Warning "Signing step encountered an issue: $_" }
           }
+          if ($failed -gt 0) { throw "$failed file(s) failed to parse." }
+          Write-Host "Parse check clean ($($files.Count) files)."
+
+      - name: Static analysis (fails on Warning+)
+        shell: pwsh
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path . -Recurse -Settings PSScriptAnalyzerSettings.psd1
+          $blocking = @($findings | Where-Object { $_.Severity -in @('Error', 'Warning') })
+          if ($blocking.Count -gt 0) {
+            $blocking | Select-Object Severity, RuleName, ScriptName, Line, Message | Format-Table -AutoSize
+            throw "$($blocking.Count) PSScriptAnalyzer finding(s) at Warning severity or above."
+          }
+          Write-Host "PSScriptAnalyzer clean."
+
+      - name: Install Pester 6
+        shell: pwsh
+        run: |
+          Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+          Import-Module Pester
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $result = Invoke-Pester -Path ./tests -Output Detailed -PassThru
+          if ($result.FailedCount -gt 0) { exit 1 }

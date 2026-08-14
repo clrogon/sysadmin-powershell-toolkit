@@ -1,68 +1,64 @@
-<#
-.Synopsis
-   Short description
+﻿<#
+.SYNOPSIS
+    Shows a balloon tip from the PowerShell icon in the notification area.
+
 .DESCRIPTION
-   The purpose of this function is to purely to display text from the PowerShell icon in the notification area.
-   https://www.computerperformance.co.uk/powershell/function-show-balloontip/
+    Displays text in a notification-area balloon tip using the classic WinForms
+    NotifyIcon API. Balloon tips are deprecated on Windows 10 and later; new
+    implementations should use Show-Notification.ps1 for modern toast
+    notifications.
 
-   *** DEPRECATED NOTICE ***
-   This script is DEPRECATED and should not be used in new implementations.
-   Balloon tip notifications are deprecated in Windows 10 and later.
-   Please use Show-Notification.ps1 for modern toast notifications instead.
-   Show-Notification.ps1 provides advanced features including:
-   - Modern Windows 10+ toast notifications
-   - Template-based notifications
-   - Scheduling capabilities
-   - User preferences support
-   - Button actions and interactions
+    *** DEPRECATED NOTICE ***
+    Balloon tip notifications are deprecated in Windows 10 and later.
+    Please use Show-Notification.ps1 for modern toast notifications instead.
 
 .EXAMPLE
-   Show-Balloontip -Text 'Look at me!' -Title 'Tip from Guy'
+    Show-BalloonTip -Text 'Look at me!' -Title 'Tip from Guy'
 .EXAMPLE
-   Show-Balloontip -Text 'Look at me!' -Title 'Tip from Guy' -Icon Error -Timeout 20000
+    Show-BalloonTip -Text 'Look at me!' -Title 'Tip from Guy' -Icon Error -Timeout 20000
 
 .NOTES
-   Deprecated since: Windows 10
-   Replacement: Show-Notification.ps1
-   Last Updated: January 07, 2026
+    Deprecated since: Windows 10
+    Replacement: Show-Notification.ps1
+    Version: 3.0
+    Author: Claudio Gonçalves
 #>
 
-Function Global:Show-BalloonTip
-{
-    # Deprecation notice: migrate to Show-Notification.ps1 for modern toast notifications
-    Write-Warning "Show-BalloonTip is deprecated and will be removed in a future release. Use Show-Notification.ps1 for modern Windows toast notifications instead."
+function Global:Show-BalloonTip {
     [CmdletBinding()]
-    [Alias()]
     [OutputType([int])]
-    Param
-    (
-        # Title help description
-        [Parameter(Mandatory=$true)]$Title,
-        # Text help description
-        [Parameter(Mandatory=$true)]$Text,
-        # Info help. Should be one of the following options 'None','Info','Warning','Error'
-        $Icon = 'Info',
-        # Timeout help. Sets the time that the balloon appears in milliseconds.  The default in this script $10000 is ten seconds.
-        $Timeout = 10000
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Title,
+        [Parameter(Mandatory=$true)]
+        [string]$Text,
+        [ValidateSet('None', 'Info', 'Warning', 'Error')]
+        [string]$Icon = 'Info',
+        [int]$Timeout = 10000
     )
 
-    Process
-    {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    if ($PopUp -eq $null)
-    {
-        $PopUp = New-Object System.Windows.Forms.NotifyIcon
+    process {
+        Write-Warning "Show-BalloonTip is deprecated and will be removed in a future release. Use Show-Notification.ps1 for modern Windows toast notifications instead."
+
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        if ($null -eq $script:PopUp) {
+            $script:PopUp = New-Object System.Windows.Forms.NotifyIcon
+        }
+
+        $script:PopUp.Icon = [System.Drawing.SystemIcons]::Information
+        $script:PopUp.BalloonTipIcon = $Icon
+        $script:PopUp.BalloonTipText = $Text
+        $script:PopUp.BalloonTipTitle = $Title
+        $script:PopUp.Visible = $true
+        $script:PopUp.ShowBalloonTip($Timeout)
+
+        Start-Sleep -Milliseconds $Timeout
+        $script:PopUp.Visible = $false
+        $script:PopUp.Dispose()
+        $script:PopUp = $null
+
+        return 0
     }
-    #$PID is process identifier for the program that runs the script, and that would be PowerShell.
-    $Path = Get-Process -Id $PID | Select-Object -ExpandProperty Path
-    #$PopUp.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($Path)
-    #Icons Avaialble Information | Error | Warning | Error
-    $PopUp.Icon = [System.Drawing.SystemIcons]::Information
-    $PopUp.BalloonTipIcon = $Icon
-    $PopUp.BalloonTipText = $Text
-    $PopUp.BalloonTipTitle = $Title
-    $PopUp.Visible = $true
-    $PopUp.ShowBalloonTip($Timeout)
-    } # End of Process
-}# End of Function
+}

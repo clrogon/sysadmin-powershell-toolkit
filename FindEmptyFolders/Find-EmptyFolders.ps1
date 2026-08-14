@@ -1,34 +1,70 @@
-<#
+﻿<#
 .SYNOPSIS
-A PowerShell script that finds and logs empty directories.
+    Finds empty directories and optionally cleans them up.
+
 .DESCRIPTION
-This script recursively scans a directory for empty subdirectories. It logs the paths of empty directories and any errors encountered during the scan. Enhanced with smart filtering, recursive cleanup, and owner analysis.
-.PARAMETER FolderPath
-The directory path to be scanned for empty directories. This parameter is mandatory and should be an existing directory.
-.PARAMETER LogFile
-The file path to which errors will be logged. Default is "C:\TSTFolder\Logs\EmptyFolders_log.log".
-.PARAMETER EmptyFoldersLog
-The file path to which empty directories will be logged. Default is "C:\TSTFolder\Logs\EmptyFolders_report.log".
-.PARAMETER LogLevel
-Controls the level of verbosity in logging. Accepted values: 'Error', 'Verbose'. Default: 'Error'.
+    Recursively scans a directory tree for empty folders, with optional smart
+    filtering (hidden/system files, minimum age), CSV export, owner analysis,
+    and recursive cleanup. When run with -RecursiveCleanup it keeps removing
+    newly-emptied parent folders until no empty folder remains.
+
 .EXAMPLE
-Find-EmptyFolders -FolderPath "C:\TestDirectory" -SmartDetection -RecursiveCleanup
-.INPUTS
-String. Accepts string inputs for FolderPath, LogFile, EmptyFoldersLog, LogLevel.
-.OUTPUTS
-None. This script does not return any output to the console, but it does write to the specified log files.
+    .\Find-EmptyFolders.ps1 -FolderPath "C:\TestDirectory" -RecursiveCleanup -WhatIf
+
+.EXAMPLE
+    .\Find-EmptyFolders.ps1 -FolderPath "C:\TestDirectory" -MinAgeDays 7 -OutputPath report.csv
+
+.PARAMETER FolderPath
+    Directory to scan for empty folders.
+
+.PARAMETER IncludeSystemFiles
+    Treat folders containing system files as empty.
+
+.PARAMETER IncludeHiddenFiles
+    Treat folders containing hidden files as empty.
+
+.PARAMETER MinAgeDays
+    Only consider a folder empty if its last write is at least this old.
+
+.PARAMETER OutputPath
+    Path of the CSV report of empty folders.
+
+.PARAMETER RecursiveCleanup
+    Remove empty folders (repeat until none remain).
+
+.PARAMETER WhatIf
+    Show what would be removed without removing anything.
+
+.PARAMETER Force
+    Remove read-only/empty protection as needed.
+
+.PARAMETER ExcludedPaths
+    Path fragments to never remove.
+
 .NOTES
-This script should be used with caution and tested thoroughly on non-production data before real use. It uses recursion to scan the directory, which could be slow on directories with a large number of subdirectories.
-.VERSION
-2.0 Enhanced with smart detection and recursive cleanup
-.AUTHOR
-Concept by Cláudio Gonçalves
+    Version: 3.0
+    Author: Claudio Gonçalves
 #>
 
 #Requires -Version 5.1
 
-Import-Module "$PSScriptRoot\..\modules\Configuration.psm1" -Force
-Import-Module "$PSScriptRoot\..\modules\Logging.psm1" -Force
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateScript({Test-Path $_ -PathType 'Container'})]
+    [string]$FolderPath,
+
+    [switch]$IncludeSystemFiles,
+    [switch]$IncludeHiddenFiles,
+    [int]$MinAgeDays = 0,
+    [string]$OutputPath = ".\empty_folders.csv",
+    [switch]$RecursiveCleanup,
+    [switch]$WhatIf,
+    [switch]$Force,
+    [string[]]$ExcludedPaths = @()
+)
+
+Import-Module "$PSScriptRoot\..\modules\ErrorHandling.psm1" -Force
 
 Initialize-ScriptConfiguration -DefaultConfig (Get-DefaultConfiguration)
 Initialize-Logging -Component "FindEmptyFolders"
@@ -40,21 +76,13 @@ function Find-EmptyFolders {
         [ValidateScript({Test-Path $_ -PathType 'Container'})]
         [string]$FolderPath,
 
-        [string]$LogFile = "C:\TSTFolder\Logs\EmptyFolders_log.log",
-
-        [string]$EmptyFoldersLog = "C:\TSTFolder\Logs\EmptyFolders_report.log",
-
         [ValidateSet('Error', 'Verbose')]
         [string]$LogLevel = 'Error'
     )
 
     $ErrorActionPreference = if ($LogLevel -eq 'Error') { 'Stop' } else { 'Continue' }
 
-    if (Test-Path -Path $EmptyFoldersLog) {
-        $LastWriteTime = (Get-Item $EmptyFoldersLog).LastWriteTime.ToString('yyyyMMdd_HHmmss')
-        Rename-Item -Path $EmptyFoldersLog -NewName ("{0}_{1}.log" -f $EmptyFoldersLog.TrimEnd('.log'), $LastWriteTime)
-    }
-
+    $emptyFolders = @()
     $directories = Get-ChildItem -Path $FolderPath -Recurse -Directory -ErrorAction SilentlyContinue
 
     $i = 0
@@ -64,55 +92,56 @@ function Find-EmptyFolders {
 
         try {
             $files = Get-ChildItem -Path $dir.FullName -File -Recurse -ErrorAction SilentlyContinue
-            if (!$files) {
-                $dir.FullName | Out-File -FilePath $EmptyFoldersLog -Append
+            if (-not $files) {
+                $emptyFolders += $dir.FullName
+                Write-ScriptLog -Level Info -Message "Empty folder: $($dir.FullName)"
             }
         }
         catch {
-            $errorMessage = "Failed to access $($dir.FullName): $($_.Exception.Message)"
-            Write-Error $errorMessage
-            $errorMessage | Out-File -FilePath $LogFile -Append
+            Write-ScriptLog -Level Error -Message "Failed to access $($dir.FullName): $($_.Exception.Message)"
         }
     }
-}
 
-#region Enhanced Functions
+    Write-Progress -Activity "Scanning directories" -Completed
+    return $emptyFolders
+}
 
 function Find-EmptyFoldersSmart {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-Path $_ -PathType 'Container'})]
         [string]$FolderPath,
         [switch]$IncludeSystemFiles,
         [switch]$IncludeHiddenFiles,
         [int]$MinAgeDays = 0,
-        [string]$OutputPath = "empty_folders.csv"
+        [string]$OutputPath = ".\empty_folders.csv"
     )
 
     $emptyFolders = @()
-    $directories = Get-ChildItem -Path $FolderPath -Recurse -Directory -Force
+    $directories = Get-ChildItem -Path $FolderPath -Recurse -Directory -Force -ErrorAction SilentlyContinue
 
+    $i = 0
     foreach ($dir in $directories) {
+        $i++
         Write-Progress -Activity "Scanning directories" -Status "Processing: $($dir.FullName)" `
-            -PercentComplete (($directories.IndexOf($dir) + 1) / $directories.Count * 100)
+            -PercentComplete (($i / $directories.Count) * 100)
 
-        # Get files with filtering
-        $files = Get-ChildItem -Path $dir.FullName -File -Force
+        $files = Get-ChildItem -Path $dir.FullName -File -Force -ErrorAction SilentlyContinue
 
         if (-not $IncludeHiddenFiles) {
-            $files = $files | Where-Object { -not $_.Attributes.HasFlag([System.IO.FileAttributes]::Hidden) }
+            $files = @($files) | Where-Object { -not $_.Attributes.HasFlag([System.IO.FileAttributes]::Hidden) }
         }
 
         if (-not $IncludeSystemFiles) {
-            $files = $files | Where-Object { -not $_.Attributes.HasFlag([System.IO.FileAttributes]::System) }
+            $files = @($files) | Where-Object { -not $_.Attributes.HasFlag([System.IO.FileAttributes]::System) }
         }
 
-        # Check minimum age
         if ($MinAgeDays -gt 0) {
-            $files = $files | Where-Object { (Get-Date) - $_.LastWriteTime -gt [TimeSpan]::FromDays($MinAgeDays) }
+            $files = @($files) | Where-Object { (Get-Date) - $_.LastWriteTime -gt [TimeSpan]::FromDays($MinAgeDays) }
         }
 
-        if ($files.Count -eq 0) {
+        if (@($files).Count -eq 0) {
             $emptyFolders += [PSCustomObject]@{
                 Path = $dir.FullName
                 Created = $dir.CreationTime
@@ -123,101 +152,69 @@ function Find-EmptyFoldersSmart {
         }
     }
 
-    $emptyFolders | Export-Csv -Path $OutputPath -NoTypeInformation
-    Write-Host "Found $($emptyFolders.Count) empty folders. Report: $OutputPath"
+    Write-Progress -Activity "Scanning directories" -Completed
 
-    return $emptyFolders
+    $exportDir = Split-Path -Parent $OutputPath
+    if ($exportDir -and -not (Test-Path $exportDir)) {
+        New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+    }
+
+    @($emptyFolders) | Export-Csv -Path $OutputPath -NoTypeInformation
+    Write-ScriptLog -Level Info -Message "Found $(@($emptyFolders).Count) empty folders. Report: $OutputPath"
+
+    return @($emptyFolders)
 }
 
 function Remove-EmptyFolders {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
+        [Parameter(Mandatory=$true)]
+        [ValidateScript({Test-Path $_ -PathType 'Container'})]
         [string]$FolderPath,
         [switch]$WhatIf,
         [switch]$Force,
-        [string]$BackupLocation,
-        [string[]]$ExcludedPaths
+        [string[]]$ExcludedPaths = @()
     )
 
-    $emptyFolders = Find-EmptyFoldersSmart -FolderPath $FolderPath
-    $removedCount = 0
+    $totalRemoved = 0
     $skippedCount = 0
 
-    foreach ($folder in $emptyFolders) {
-        # Check exclusions
-        $excluded = $false
-        foreach ($exclusion in $ExcludedPaths) {
-            if ($folder.Path -like "*$exclusion*") {
-                $excluded = $true
-                break
-            }
-        }
-
-        if ($excluded) {
-            $skippedCount++
-            Write-Warning "Skipping excluded folder: $($folder.Path)"
-            continue
-        }
-
-        # Backup if specified
-        if ($BackupLocation) {
-            $backupPath = Join-Path $BackupLocation ($folder.Path -replace [regex]::Escape($FolderPath), "")
-            try {
-                $null = New-Item -ItemType Directory -Path $backupPath -Force -WhatIf:$WhatIf
-            }
-            catch {
-                Write-Warning "Could not create backup: $_"
-            }
-        }
-
-        # Remove folder
-        try {
-            Remove-Item -Path $folder.Path -Force -WhatIf:$WhatIf
-            $removedCount++
-            Write-ScriptLog -Level Info -Message "Removed: $($folder.Path)"
-        }
-        catch {
-            Write-ScriptLog -Level Error -Message "Failed to remove $($folder.Path): $_"
-        }
-    }
-
-    Write-Host "`nCleanup Summary:"
-    Write-Host "  Removed: $removedCount folders"
-    Write-Host "  Skipped: $skippedCount folders"
-}
-
-function Find-DeeplyEmptyFolders {
-    [CmdletBinding()]
-    param(
-        [string]$FolderPath,
-        [switch]$RemoveAll
-    )
-
-    $changed = $true
-    $totalRemoved = 0
-
-    while ($changed) {
+    do {
         $changed = $false
-        $emptyFolders = Find-EmptyFoldersSmart -FolderPath $FolderPath
-
-        if ($emptyFolders.Count -eq 0) {
-            break
-        }
+        $emptyFolders = Find-EmptyFoldersSmart -FolderPath $FolderPath -IncludeHiddenFiles:$IncludeHiddenFiles -IncludeSystemFiles:$IncludeSystemFiles -MinAgeDays $MinAgeDays
 
         foreach ($folder in $emptyFolders) {
-            try {
-                Remove-Item -Path $folder.Path -Force
-                Write-Host "Removed: $($folder.Path)"
-                $changed = $true
-                $totalRemoved++
+            $excluded = $false
+            foreach ($exclusion in $ExcludedPaths) {
+                if ($folder.Path -like "*$exclusion*") {
+                    $excluded = $true
+                    break
+                }
             }
-            catch {
-                Write-Warning "Could not remove $($folder.Path)"
+
+            if ($excluded) {
+                $skippedCount++
+                Write-ScriptLog -Level Info -Message "Skipping excluded folder: $($folder.Path)"
+                continue
+            }
+
+            if ($PSCmdlet.ShouldProcess($folder.Path, 'Remove empty folder')) {
+                try {
+                    Remove-Item -Path $folder.Path -Force:$Force -ErrorAction Stop
+                    Write-ScriptLog -Level Info -Message "Removed: $($folder.Path)"
+                    $totalRemoved++
+                    $changed = $true
+                }
+                catch {
+                    Write-ScriptLog -Level Error -Message "Failed to remove $($folder.Path): $($_.Exception.Message)"
+                }
             }
         }
-    }
+    } while ($changed)
 
-    Write-Host "Total removed: $totalRemoved folders"
+    Write-Host "`nCleanup Summary:"
+    Write-Host "  Removed: $totalRemoved folders"
+    Write-Host "  Skipped: $skippedCount folders"
 }
 
 function Get-EmptyFolderOwners {
@@ -237,7 +234,6 @@ function Get-EmptyFolderOwners {
             if (-not $ownerStats.ContainsKey($owner)) {
                 $ownerStats[$owner] = @{
                     Count = 0
-                    TotalSize = 0
                     Folders = @()
                 }
             }
@@ -287,4 +283,11 @@ function Schedule-EmptyFolderCleanup {
     Write-ScriptLog -Level Info -Message "Scheduled empty folder cleanup: $Frequency at $ScheduleTime"
 }
 
-#endregion
+# ---- Main ----
+
+Find-EmptyFoldersSmart -FolderPath $FolderPath -IncludeSystemFiles:$IncludeSystemFiles `
+    -IncludeHiddenFiles:$IncludeHiddenFiles -MinAgeDays $MinAgeDays -OutputPath $OutputPath | Out-Null
+
+if ($RecursiveCleanup) {
+    Remove-EmptyFolders -FolderPath $FolderPath -WhatIf:$WhatIf -Force:$Force -ExcludedPaths $ExcludedPaths
+}

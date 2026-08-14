@@ -1,4 +1,4 @@
-<#
+﻿<#
 .Synopsis
     PowerShell script for Windows 11/Intune reboot reminders with modern toast notifications
 .Description
@@ -82,7 +82,7 @@ param (
 
 #region Helper Functions
 
-function Write-ScriptLog {
+function Write-RebootLog {
     param(
         [Parameter(Mandatory=$true)]
         [ValidateSet('Info','Warning','Error','Debug')]
@@ -293,7 +293,7 @@ function Show-Windows11Toast {
             return $true
         }
         catch {
-            Write-ScriptLog -Level Warning -Message "BurntToast failed: $_. Falling back to native notifications."
+            Write-RebootLog -Level Warning -Message "BurntToast failed: $_. Falling back to native notifications."
         }
     }
 
@@ -307,9 +307,6 @@ function Show-NativeToast {
     )
 
     try {
-        $assembly = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
-        $assembly = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
-
         $template = @"
 <toast>
     <visual>
@@ -331,7 +328,7 @@ function Show-NativeToast {
         return $true
     }
     catch {
-        Write-ScriptLog -Level Error -Message "Native toast failed: $_"
+        Write-RebootLog -Level Error -Message "Native toast failed: $_"
         return $false
     }
 }
@@ -365,7 +362,7 @@ function Show-RebootReminder {
 }
 
 function Show-RebootEnforced {
-    Show-Windows11Toast -Title "🔄 System Rebooting" -Message "Your system will reboot in 10 minutes to apply critical updates. Please save your work immediately."
+    Show-Windows11Toast -Title "🔒 System Rebooting" -Message "Your system will reboot in 10 minutes to apply critical updates. Please save your work immediately."
 }
 
 #endregion
@@ -420,10 +417,10 @@ function Update-ComplianceReport {
 
         $existingReport | ConvertTo-Json -Depth 10 | Set-Content $reportPath -Force
 
-        Write-ScriptLog -Level Info -Message "Compliance report updated: $reportPath"
+        Write-RebootLog -Level Info -Message "Compliance report updated: $reportPath"
     }
     catch {
-        Write-ScriptLog -Level Error -Message "Failed to update compliance report: $_"
+        Write-RebootLog -Level Error -Message "Failed to update compliance report: $_"
     }
 }
 
@@ -444,17 +441,17 @@ function Invoke-IntuneRemediation {
     $status = Get-IntuneComplianceStatus
 
     if ($status.Compliant) {
-        Write-ScriptLog -Level Info -Message "System is compliant. No action needed."
+        Write-RebootLog -Level Info -Message "System is compliant. No action needed."
         return
     }
 
     if (Test-IsWeekend) {
-        Write-ScriptLog -Level Info -Message "Skipping notification on weekend"
+        Write-RebootLog -Level Info -Message "Skipping notification on weekend"
         return
     }
 
     if (-not (Test-IsWorkHours)) {
-        Write-ScriptLog -Level Info -Message "Skipping notification outside work hours"
+        Write-RebootLog -Level Info -Message "Skipping notification outside work hours"
         return
     }
 
@@ -466,7 +463,7 @@ function Invoke-IntuneRemediation {
     }
 
     if ($hoursSinceReminder -lt 1) {
-        Write-ScriptLog -Level Info -Message "Reminder shown less than 1 hour ago. Skipping."
+        Write-RebootLog -Level Info -Message "Reminder shown less than 1 hour ago. Skipping."
         return
     }
 
@@ -483,7 +480,7 @@ function Invoke-IntuneRemediation {
 
     Update-ComplianceReport -ComplianceStatus $status
 
-    Write-ScriptLog -Level Info -Message "Reboot reminder displayed to user"
+    Write-RebootLog -Level Info -Message "Reboot reminder displayed to user"
 }
 
 function Invoke-GracefulReboot {
@@ -492,7 +489,7 @@ function Invoke-GracefulReboot {
         [string]$WarningMessage = "System will reboot in {0} minutes. Please save your work."
     )
 
-    Write-ScriptLog -Level Warning -Message "Initiating graceful reboot sequence"
+    Write-RebootLog -Level Warning -Message "Initiating graceful reboot sequence"
 
     Show-RebootEnforced
 
@@ -502,19 +499,19 @@ function Invoke-GracefulReboot {
         $remaining = [math]::Round(($endTime - (Get-Date)).TotalMinutes)
 
         if ($remaining -le 5 -or $remaining % 5 -eq 0) {
-            Write-ScriptLog -Level Info -Message ($WarningMessage -f $remaining)
+            Write-RebootLog -Level Info -Message ($WarningMessage -f $remaining)
         }
 
         Start-Sleep -Seconds 30
     }
 
-    Write-ScriptLog -Level Warning -Message "Executing system reboot"
+    Write-RebootLog -Level Warning -Message "Executing system reboot"
 
     try {
         Restart-Computer -Force -ErrorAction Stop
     }
     catch {
-        Write-ScriptLog -Level Error -Message "Failed to restart computer: $_"
+        Write-RebootLog -Level Error -Message "Failed to restart computer: $_"
         shutdown /g /f /t 0
     }
 }
@@ -543,11 +540,11 @@ function Register-RebootReminderTask {
 
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force -ErrorAction Stop
 
-        Write-ScriptLog -Level Info -Message "Scheduled task '$TaskName' registered successfully"
+        Write-RebootLog -Level Info -Message "Scheduled task '$TaskName' registered successfully"
         return $true
     }
     catch {
-        Write-ScriptLog -Level Error -Message "Failed to register scheduled task: $_"
+        Write-RebootLog -Level Error -Message "Failed to register scheduled task: $_"
         return $false
     }
 }
@@ -559,11 +556,11 @@ function Unregister-RebootReminderTask {
 
     try {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-        Write-ScriptLog -Level Info -Message "Scheduled task '$TaskName' unregistered successfully"
+        Write-RebootLog -Level Info -Message "Scheduled task '$TaskName' unregistered successfully"
         return $true
     }
     catch {
-        Write-ScriptLog -Level Warning -Message "Failed to unregister scheduled task: $_"
+        Write-RebootLog -Level Warning -Message "Failed to unregister scheduled task: $_"
         return $false
     }
 }
@@ -581,11 +578,11 @@ function Register-UserContextTask {
 
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Force -ErrorAction Stop
 
-        Write-ScriptLog -Level Info -Message "User context task '$TaskName' registered successfully"
+        Write-RebootLog -Level Info -Message "User context task '$TaskName' registered successfully"
         return $true
     }
     catch {
-        Write-ScriptLog -Level Error -Message "Failed to register user context task: $_"
+        Write-RebootLog -Level Error -Message "Failed to register user context task: $_"
         return $false
     }
 }
@@ -594,7 +591,7 @@ function Register-UserContextTask {
 
 #region Main Execution
 
-function Initialize-Logging {
+function Initialize-RebootLogging {
     if (-not (Test-Path $LogPath)) {
         try {
             $logDir = Split-Path $LogPath -Parent
@@ -602,7 +599,7 @@ function Initialize-Logging {
                 New-Item -Path $logDir -ItemType Directory -Force | Out-Null
             }
             New-Item -Path $LogPath -ItemType File -Force | Out-Null
-            Write-ScriptLog -Level Info -Message "Log file created: $LogPath"
+            Write-RebootLog -Level Info -Message "Log file created: $LogPath"
         }
         catch {
             Write-Error "Failed to create log file: $_"
@@ -616,19 +613,19 @@ function Initialize-Logging {
             $archivePath = "$LogPath.old"
             Move-Item $LogPath $archivePath -Force
             New-Item -Path $LogPath -ItemType File -Force | Out-Null
-            Write-ScriptLog -Level Info -Message "Log file archived"
+            Write-RebootLog -Level Info -Message "Log file archived"
         }
         catch {
-            Write-ScriptLog -Level Error -Message "Failed to archive log file: $_"
+            Write-RebootLog -Level Error -Message "Failed to archive log file: $_"
         }
     }
 }
 
 function Main {
-    Write-ScriptLog -Level Info -Message "=== Reboot Reminder Script Started ==="
-    Write-ScriptLog -Level Info -Message "Parameters: DaysLimit=$DaysLimit, HoursLimit=$HoursLimit, IntuneMode=$IntuneMode, CheckOnly=$CheckOnly"
+    Write-RebootLog -Level Info -Message "=== Reboot Reminder Script Started ==="
+    Write-RebootLog -Level Info -Message "Parameters: DaysLimit=$DaysLimit, HoursLimit=$HoursLimit, IntuneMode=$IntuneMode, CheckOnly=$CheckOnly"
 
-    Initialize-Logging
+    Initialize-RebootLogging
 
     if ($CheckOnly) {
         Invoke-IntuneDetection
@@ -637,26 +634,26 @@ function Main {
 
     if ($IntuneMode) {
         Invoke-IntuneRemediation
-        Write-ScriptLog -Level Info -Message "=== Reboot Reminder Script Completed (Intune Mode) ==="
+        Write-RebootLog -Level Info -Message "=== Reboot Reminder Script Completed (Intune Mode) ==="
         return
     }
 
     $uptime = Get-SystemUptime
-    Write-ScriptLog -Level Info -Message "System uptime: $($uptime.UptimeDays) days ($($uptime.UptimeHours) hours)"
+    Write-RebootLog -Level Info -Message "System uptime: $($uptime.UptimeDays) days ($($uptime.UptimeHours) hours)"
 
     if ($uptime.UptimeDays -lt $DaysLimit) {
-        Write-ScriptLog -Level Info -Message "System is within uptime limit. No action required."
+        Write-RebootLog -Level Info -Message "System is within uptime limit. No action required."
         Update-RebootTracking -Action 'Rebooted'
         return
     }
 
     if (Test-IsWeekend) {
-        Write-ScriptLog -Level Info -Message "Skipping operation on weekend"
+        Write-RebootLog -Level Info -Message "Skipping operation on weekend"
         return
     }
 
     if (-not (Test-IsWorkHours)) {
-        Write-ScriptLog -Level Info -Message "Skipping operation outside work hours"
+        Write-RebootLog -Level Info -Message "Skipping operation outside work hours"
         return
     }
 
@@ -670,12 +667,12 @@ function Main {
     Initialize-RebootTracking | Out-Null
 
     if ($hoursSinceFirstReminder -ge $HoursLimit -or $ForceReboot) {
-        Write-ScriptLog -Level Warning -Message "Grace period exceeded or forced reboot requested"
+        Write-RebootLog -Level Warning -Message "Grace period exceeded or forced reboot requested"
         Invoke-GracefulReboot
     }
     else {
         $hoursRemaining = $HoursLimit - $hoursSinceFirstReminder
-        Write-ScriptLog -Level Info -Message "Displaying reboot reminder. Hours remaining: $hoursRemaining"
+        Write-RebootLog -Level Info -Message "Displaying reboot reminder. Hours remaining: $hoursRemaining"
 
         Update-RebootTracking -Action 'Reminder'
 
@@ -684,17 +681,17 @@ function Main {
 
         Update-ComplianceReport -ComplianceStatus (Get-IntuneComplianceStatus)
 
-        Write-ScriptLog -Level Info -Message "Reboot reminder sent to user"
+        Write-RebootLog -Level Info -Message "Reboot reminder sent to user"
     }
 
-    Write-ScriptLog -Level Info -Message "=== Reboot Reminder Script Completed ==="
+    Write-RebootLog -Level Info -Message "=== Reboot Reminder Script Completed ==="
 }
 
 try {
     Main
 }
 catch {
-    Write-ScriptLog -Level Error -Message "Script failed: $($_.Exception.Message)`nStackTrace: $($_.ScriptStackTrace)"
+    Write-RebootLog -Level Error -Message "Script failed: $($_.Exception.Message)`nStackTrace: $($_.ScriptStackTrace)"
     exit 1
 }
 

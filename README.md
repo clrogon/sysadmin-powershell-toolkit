@@ -1,4 +1,4 @@
-# PowerShell Scripts Repository | Repositório de Scripts PowerShell
+# SysAdmin PowerShell Toolkit | Kit de Ferramentas PowerShell para SysAdmin
 
 > **EN**: A production-grade collection of system administration PowerShell scripts for Windows environments. Built with security, automation, and operational excellence as core principles. Designed for IT professionals managing enterprise Windows infrastructure.
 
@@ -7,13 +7,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-blue.svg)](https://microsoft.com/powershell)
 [![Security](https://img.shields.io/badge/Security-Audited-green.svg)](SECURITY.md)
-[![Quality](https://img.shields.io/badge/Code%20Quality-Enterprise-blue.svg)](ENHANCEMENTS_IMPLEMENTED.md)
+[![CI](https://github.com/clrogon/sysadmin-powershell-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/clrogon/sysadmin-powershell-toolkit/actions/workflows/ci.yml)
 
-**Latest Release | Última Versão**: v2.0 (January 2026)
+**Latest Release | Última Versão**: v3.0.0 (August 2026)
 
 ---
 
-## 📊 Current Status | Estado Actual (v2.0 - January 2026)
+## 📊 Current Status | Estado Actual (v3.0.0 - August 2026)
 
 | Module | Módulo | Status EN | Estado PT | Maturity | Maturidade |
 |--------|-----------|-----------|-----------|-----------|
@@ -35,7 +35,7 @@
 
 ## 🔐 Security Status | Estado de Segurança
 
-**Latest Security Update | Atualização de Segurança Recente**: v2.0 (January 2026)
+**Latest Security Update | Atualização de Segurança Recente**: v3.0.0 (August 2026)
 
 | Security Issue | Issue de Segurança | Status | Description | Descrição |
 |---------------|--------------------|--------|-------------|------------|
@@ -313,38 +313,40 @@ flowchart TB
 ## 📦 Project Structure | Estrutura do Projeto
 
 ```
-PowerShellScripts/
+sysadmin-powershell-toolkit/
 ├── modules/                    # Core framework modules | Módulos framework principais
 │   ├── Configuration.psm1       # Config management | Gestão de configuração
 │   ├── Logging.psm1             # Unified logging | Registo unificado
 │   └── ErrorHandling.psm1        # Error handling | Tratamento de erros
+├── tests/                       # Pester test suite | Suíte de testes Pester
+│   ├── Configuration.Tests.ps1
+│   ├── Logging.Tests.ps1
+│   └── ErrorHandling.Tests.ps1
 ├── Measure-TransferSpeed/        # Network performance | Desempenho de rede
-│   ├── Measure-TransferSpeed.ps1
-│   └── README.md
+│   └── Measure-TransferSpeed.ps1
 ├── Show-Notification/            # Notification system | Sistema de notificação
-│   ├── Show-Notification.ps1
-│   └── README.md
+│   └── Show-Notification.ps1
 ├── USBPortManagement/            # USB device control | Controlo de dispositivos USB
-│   ├── USBManagementTool.ps1
-│   └── README.md
+│   └── USBPortManagement.ps1
 ├── Find-DuplicateFiles/           # Duplicate detection | Detecção de duplicados
-│   ├── Find-DuplicateFiles.ps1
-│   └── README.md
+│   └── Find-DuplicateFiles.ps1
 ├── RebootReminder/               # Reboot management | Gestão de reinícios
 │   ├── RebootReminder.ps1
-│   └── README.md
+│   ├── RebootReminder-Detection.ps1
+│   └── RebootReminder-Remediation.ps1
 ├── DeploymentScript/              # Software deployment | Implementação de software
-│   ├── DeploymentScript.ps1
-│   └── README.md
+│   └── DeploymentScript.ps1
 ├── FindEmptyFolders/              # Directory cleanup | Limpeza de diretórios
-│   ├── FindEmptyFolders.ps1
-│   └── README.md
+│   └── Find-EmptyFolders.ps1
 ├── ClearTeamsCache/              # Teams maintenance | Manutenção Teams
-│   ├── ClearTeamsCache.ps1
-│   └── README.md
+│   └── ClearTeamsCache.ps1
 ├── ShowBalloonTips/              # [DEPRECATED] Legacy notifications | Notificações legadas
-│   ├── Show-BallonTips.ps1
-│   └── README.md
+│   └── Show-BallonTips.ps1
+├── signing/                      # Code signing helpers | Auxiliares de assinatura de código
+│   ├── Sign-Scripts.ps1
+│   └── SigningPolicy.md
+├── .github/workflows/ci.yml     # CI: parse + analyzer + Pester
+├── PSScriptAnalyzerSettings.psd1 # Analyzer rule whitelist
 ├── docs/                         # Documentation | Documentação
 │   └── pt-PT/                 # Portuguese documentation | Documentação em português
 ├── SECURITY.md                   # Security documentation | Documentação de segurança
@@ -369,8 +371,8 @@ PowerShellScripts/
 
 **1. Clone the repository | Clonar o repositório**
 ```bash
-git clone https://github.com/clrogon/PowerShellScripts.git
-cd PowerShellScripts
+git clone https://github.com/clrogon/sysadmin-powershell-toolkit.git
+cd sysadmin-powershell-toolkit
 ```
 
 **2. Import framework modules (optional, for development) | Importar módulos framework (opcional, para desenvolvimento)**
@@ -378,6 +380,11 @@ cd PowerShellScripts
 Import-Module .\modules\Configuration.psm1
 Import-Module .\modules\Logging.psm1
 Import-Module .\modules\ErrorHandling.psm1
+```
+
+**3. Run the test suite | Executar a suíte de testes**
+```powershell
+Invoke-Pester -Path .\tests
 ```
 
 ### Usage Examples | Exemplos de Utilização
@@ -430,7 +437,7 @@ Import-Module .\modules\ErrorHandling.psm1
 #### USB Device Management | Gestão de Dispositivos USB
 ```powershell
 # Launch GUI with policy | Iniciar GUI com política
-.\USBPortManagement\USBManagementTool.ps1 `
+.\USBPortManagement\USBPortManagement.ps1 `
     -LogUserActions `
     -SecurityLevel High
 ```
@@ -483,23 +490,27 @@ Each script includes its own README with:
 
 ### Framework Modules | Módulos Framework
 
+Scripts import only **ErrorHandling.psm1**, which re-exports the full framework (Configuration + Logging + Error Handling):
+
 ```powershell
-# Configuration Management | Gestão de Configuração
-Import-Module modules\Configuration.psm1
+# Framework contract | Contrato do framework (one import | uma única importação)
+Import-Module "$PSScriptRoot\..\modules\ErrorHandling.psm1" -Force
 Initialize-ScriptConfiguration -DefaultConfig (Get-DefaultConfiguration)
+Initialize-Logging -Component "YourScriptName"
+
+# Configuration Management | Gestão de Configuração
 $configValue = Get-ScriptConfiguration -Key "SettingName"
 
 # Unified Logging | Registo Unificado
-Import-Module modules\Logging.psm1
-Initialize-Logging -Component "YourScriptName"
 Write-ScriptLog -Level Info -Message "Operation completed"
 
 # Error Handling | Tratamento de Erros
-Import-Module modules\ErrorHandling.psm1
 Invoke-ScriptBlockWithErrorHandling -ScriptBlock {
     # Your code here | O seu código aqui
 } -Operation "Descriptive Name" -MaxRetries 3
 ```
+
+For a standalone run, prefix the import with `-ErrorAction SilentlyContinue` so the script still works when the framework is not present.
 
 ---
 
@@ -531,7 +542,7 @@ Este projeto está licenciado sob a **Licença MIT** - veja o ficheiro [LICENSE]
   - Security Audit | Auditoria de Segurança: [SECURITY_AUDIT_SUMMARY.md](SECURITY_AUDIT_SUMMARY.md)
   - Security Checklist | Lista de Verificação: [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md)
   - Enhancements | Melhorias: [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md)
-  - Issues | Problemas: [GitHub Issues](https://github.com/clrogon/PowerShellScripts/issues)
+  - Issues | Problemas: [GitHub Issues](https://github.com/clrogon/sysadmin-powershell-toolkit/issues)
   - Email | Email: [contact information placeholder]
 
 - **PT**: 
@@ -540,20 +551,28 @@ Este projeto está licenciado sob a **Licença MIT** - veja o ficheiro [LICENSE]
   - Auditoria de Segurança: [SECURITY_AUDIT_SUMMARY.md](SECURITY_AUDIT_SUMMARY.md)
   - Lista de Verificação: [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md)
   - Melhorias: [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md)
-  - Problemas: [GitHub Issues](https://github.com/clrogon/PowerShellScripts/issues)
+  - Problemas: [GitHub Issues](https://github.com/clrogon/sysadmin-powershell-toolkit/issues)
   - Email: [informação de contacto placeholder]
 
 ---
 
 ## 🗺️ Roadmap | Roteiro
 
-**EN**: See [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md) for completed enhancements and future improvements. Our roadmap includes integration with Pester testing, CI/CD pipeline setup, and additional enterprise features.
+**EN**: See [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md) for completed enhancements and future improvements. Implemented: Pester test suite for the core framework, GitHub Actions CI/CD pipeline (parse check, PSScriptAnalyzer, Pester on Ubuntu + Windows), PSScriptAnalyzer rule whitelist. Planned: Docker containerization, additional notification templates, integration with Azure Automation/AWS Systems Manager, localized language support (PT-AO, ES, FR).
 
-**PT**: Veja [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md) para melhorias completas e melhorias futuras. O nosso roteiro inclui integração com testes Pester, configuração de pipeline CI/CD e funcionalidades empresariais adicionais.
+**PT**: Veja [ENHANCEMENTS_IMPLEMENTED.md](ENHANCEMENTS_IMPLEMENTED.md) para melhorias completas e melhorias futuras. Implementadas: suíte de testes Pester para o framework principal, pipeline CI/CD do GitHub Actions (verificação de parse, PSScriptAnalyzer, Pester em Ubuntu + Windows), whitelist de regras PSScriptAnalyzer. Planeadas: contentorização Docker, templates de notificação adicionais, integração com Azure Automation/AWS Systems Manager, suporte de idiomas localizados (PT-AO, ES, FR).
 
-### Planned Features | Funcionalidades Planeadas
-- **EN**: Pester test suite for all scripts • GitHub Actions CI/CD pipeline • Docker containerization • Additional notification templates • Integration with Azure Automation/AWS Systems Manager • Localized language support (PT-AO, PT-PT, ES, FR)
-- **PT**: Suíte de testes Pester para todos os scripts • Pipeline CI/CD do GitHub Actions • Contentorização Docker • Templates de notificação adicionais • Integração com Azure Automation/AWS Systems Manager • Suporte de idiomas localizados (PT-AO, PT-PT, ES, FR)
+### CI/CD Pipeline | Pipeline CI/CD
+
+**EN**: Every push to `main` and every pull request triggers the [CI workflow](.github/workflows/ci.yml) on both Ubuntu and Windows runners:
+1. **Parse check** — every `.ps1`/`.psm1`/`.psd1` must parse without errors
+2. **Static analysis** — PSScriptAnalyzer must report zero findings at Warning severity or above (settings in [PSScriptAnalyzerSettings.psd1](PSScriptAnalyzerSettings.psd1))
+3. **Tests** — the Pester suite must pass with zero failures
+
+**PT**: Cada push para `main` e cada pull request aciona o [workflow CI](.github/workflows/ci.yml) em runners Ubuntu e Windows:
+1. **Verificação de parse** — todos os ficheiros `.ps1`/`.psm1`/`.psd1` devem fazer parse sem erros
+2. **Análise estática** — o PSScriptAnalyzer não pode reportar achados de severidade Warning ou superior (definições em [PSScriptAnalyzerSettings.psd1](PSScriptAnalyzerSettings.psd1))
+3. **Testes** — a suíte Pester deve passar sem falhas
 
 ---
 
@@ -590,4 +609,4 @@ Este projeto está licenciado sob a **Licença MIT** - veja o ficheiro [LICENSE]
 
 **Made with ❤️ for Windows IT Administrators | Feito com ❤️ para Administradores TI Windows**
 
-**Versão**: 2.0 | **Data**: January 2026 | **Status**: ✅ Production Ready | ✅ Pronto para Produção
+**Versão**: 3.0.0 | **Data**: August 2026 | **Status**: ✅ Production Ready | ✅ Pronto para Produção

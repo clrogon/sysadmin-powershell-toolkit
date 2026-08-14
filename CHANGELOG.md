@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-14
+
+### Changed
+- Repository renamed to **sysadmin-powershell-toolkit**; remote updated to `github.com/clrogon/sysadmin-powershell-toolkit`, default branch `main`
+- Framework contract simplified: scripts import only `ErrorHandling.psm1`, which re-exports Configuration + Logging + Error Handling
+- Configuration state moved to `$global:ScriptConfiguration` so nested `Import-Module -Force` instances share state
+- `Test-AdministrativePrivileges` now cross-platform via `RuntimeInformation` (was WindowsIdentity-only)
+- `Register-EventLogSource` guards for the missing `System.Diagnostics.EventLog` type on Linux
+- Encoding normalized: all `.ps1`/`.psm1` files re-encoded to UTF-8 with BOM; mojibake in `RebootReminder.ps1` repaired
+
+### Added
+- Pester test suite: `tests/Configuration.Tests.ps1`, `tests/Logging.Tests.ps1`, `tests/ErrorHandling.Tests.ps1` (18 tests)
+- GitHub Actions CI (`.github/workflows/ci.yml`): parse check, PSScriptAnalyzer (Warning+ fails), Pester — matrix Ubuntu + Windows
+- `PSScriptAnalyzerSettings.psd1`: rule whitelist with documented exclusions for repo-wide conventions
+- `.gitignore` exception so `PSScriptAnalyzerSettings.psd1` is committed
+
+### Security
+- All analyzer findings fixed: empty catch blocks, auto-var renames, `$null -eq` comparisons, positional Write-Host
+
 ## [2.0] - 2026-01-07
 
 ### Security 🔒
@@ -93,5 +112,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show-Notification
 - Measure Transfer Speed
 
-[Unreleased]: https://github.com/claudiogoncalves/PowerShell/compare/v1.0...HEAD
-[2.0]: https://github.com/claudiogoncalves/PowerShell/releases/tag/v2.0
+[Unreleased]: https://github.com/clrogon/sysadmin-powershell-toolkit/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/clrogon/sysadmin-powershell-toolkit/releases/tag/v3.0.0
+[2.0]: https://github.com/clrogon/sysadmin-powershell-toolkit/releases/tag/v2.0
