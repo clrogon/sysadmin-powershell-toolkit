@@ -17,10 +17,14 @@
     #   declaring a single OutputType is not accurate and adds churn without signal.
     # - PSProvideCommentHelp: Information severity only. Internal helpers in scripts are
     #   self-documenting via parameter names; only exported module functions get help.
-    # - PSReviewUnusedParameter: false positives. Script-level parameters (e.g.
-    #   RebootReminder -DaysLimit, -NotifyThreshold) are consumed by functions declared
-    #   later in the same file, but the analyzer cannot see the cross-function use and
-    #   reports them as unused.
+    # - PSReviewUnusedParameter: false positives. Genuinely dead parameters were removed
+    #   (TimeoutSeconds in Test-NetworkConnectivity; resolutionStrategy/MovePath/
+    #   TargetDir in Find-DuplicateFiles.ps1; MSIPath in Deploy-SoftwareToComputer;
+    #   software in the DeploymentScript toast). The remaining findings are script-level
+    #   parameters (e.g. RebootReminder -DaysLimit, -CheckOnly) consumed by functions
+    #   declared later in the same file, plus ClearTeamsCache -WarningMinutes (used via
+    #   $using: inside the notification scriptblock); the analyzer cannot see either
+    #   cross-function or $using: usage and reports them as unused.
     # - PSUseSingularNouns: the tool names are the public surface of this repo
     #   (Find-DuplicateFiles, Remove-EmptyFolders, Clear-TeamsCacheFiles). Renaming them
     #   to satisfy the noun rule would break every documented invocation and scheduled

@@ -315,9 +315,9 @@ flowchart TB
 ```
 sysadmin-powershell-toolkit/
 ├── modules/                    # Core framework modules | Módulos framework principais
-│   ├── Configuration.psm1       # Config management | Gestão de configuração
-│   ├── Logging.psm1             # Unified logging | Registo unificado
-│   └── ErrorHandling.psm1        # Error handling | Tratamento de erros
+│   ├── Configuration.psm1/.psd1 # Config management | Gestão de configuração
+│   ├── Logging.psm1/.psd1       # Unified logging | Registo unificado
+│   └── ErrorHandling.psm1/.psd1 # Error handling | Tratamento de erros
 ├── tests/                       # Pester test suite | Suíte de testes Pester
 │   ├── Configuration.Tests.ps1
 │   ├── Logging.Tests.ps1
@@ -377,9 +377,9 @@ cd sysadmin-powershell-toolkit
 
 **2. Import framework modules (optional, for development) | Importar módulos framework (opcional, para desenvolvimento)**
 ```powershell
-Import-Module .\modules\Configuration.psm1
-Import-Module .\modules\Logging.psm1
-Import-Module .\modules\ErrorHandling.psm1
+Import-Module .\modules\Configuration.psd1
+Import-Module .\modules\Logging.psd1
+Import-Module .\modules\ErrorHandling.psd1
 ```
 
 **3. Run the test suite | Executar a suíte de testes**

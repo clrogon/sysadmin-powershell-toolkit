@@ -235,7 +235,6 @@ function Deploy-SoftwareToComputer {
     [CmdletBinding()]
     param(
         [string]$ComputerName,
-        [string]$MSIPath,
         [string]$ProductCode,
         [string]$InstallerUrl,
         [string]$InstallerPath
@@ -397,7 +396,7 @@ function Invoke-StagedDeployment {
             Write-Progress -Activity "Stage: $($stage.Stage)" -Status "Deploying to: $computer" `
                 -PercentComplete (($index / $stageComputers.Count) * 100)
 
-            $result = Deploy-SoftwareToComputer -ComputerName $computer -MSIPath $MSIPath -ProductCode $ProductCode `
+            $result = Deploy-SoftwareToComputer -ComputerName $computer -ProductCode $ProductCode `
                 -InstallerUrl $InstallerUrl -InstallerPath $InstallerPath
             $deployment.Results += $result
 
@@ -593,7 +592,6 @@ function Notify-UsersOfDeployment {
 
         try {
             Invoke-RemoteOperation -ComputerName $computer -Credential $script:credential -ScriptBlock {
-                param($software)
                 Add-Type -AssemblyName Windows.UI.Notifications -ErrorAction SilentlyContinue
                 $xml = @"
 <toast>
@@ -608,7 +606,7 @@ function Notify-UsersOfDeployment {
                 $doc = New-Object Windows.Data.Xml.Dom.XmlDocument
                 $doc.LoadXml($xml)
                 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Software Deployment").Show($doc)
-            } -ArgumentList @($SoftwareName) -ErrorAction SilentlyContinue
+            } -ErrorAction SilentlyContinue
         }
         catch {
             Write-ScriptLog -Level Warning -Message "Could not notify $user on ${computer}: $($_.Exception.Message)"
@@ -675,8 +673,8 @@ foreach ($computer in $computers) {
     }
 
     try {
-        $result = Deploy-SoftwareToComputer -ComputerName $computer -MSIPath $msiFilePath `
-            -ProductCode $script:productCode -InstallerUrl $installerUrl -InstallerPath $installerPath
+$result = Deploy-SoftwareToComputer -ComputerName $computer `
+-ProductCode $script:productCode -InstallerUrl $installerUrl -InstallerPath $installerPath
 
         if ($result.Success) {
             Write-ScriptLog -Level Info -Message "Installation completed on ${computer}"
@@ -692,3 +690,4 @@ foreach ($computer in $computers) {
 
 Write-ScriptLog -Level Info -Message "Deployment run finished for $($computers.Count) computer(s)."
 exit 0
+

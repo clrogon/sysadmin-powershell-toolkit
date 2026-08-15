@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Modules now have proper `.psd1` manifests (`modules/Configuration.psd1`, `modules/Logging.psd1`, `modules/ErrorHandling.psd1`) with `RootModule`, version 3.0.0, full `FunctionsToExport`
+- Pester tests for the individual scripts via a new AST-extraction helper (`tests/Import-ScriptFunctions.ps1`): `Find-DuplicateFiles`, `Find-EmptyFolders`, `Measure-TransferSpeed`, `DeploymentScript`, `Show-Notification`, `RebootReminder`, `ClearTeamsCache` (45 tests added; suite now 65 tests, run on Ubuntu + Windows in CI)
+- Removed superseded `CONTRIBUTING_OLD.md` (fully replaced by `CONTRIBUTING.md`)
+
+### Fixed
+- `Write-ScriptLog` no longer leaks its structured log entry into the caller's pipeline by default (use `-PassThru` to capture it). Bare `Write-ScriptLog` calls inside data-returning functions previously polluted return values - e.g. `Find-DuplicateFiles` returned log-entry objects mixed with real duplicates, which its own `Resolve-DuplicatesIntelligently` step then processed
+- `Find-EmptyFolders.ps1`: `Remove-EmptyFolders` and the script param block collided on a manual `[switch]$WhatIf` plus `[CmdletBinding(SupportsShouldProcess)]` (`ParameterNameAlreadyExistsForCommand` at invocation); now a plain `[CmdletBinding()]` with the manual switch, matching the documented convention in `PSScriptAnalyzerSettings.psd1`
+- Removed genuinely dead parameters flagged by `PSReviewUnusedParameter`: `TimeoutSeconds` (`Test-NetworkConnectivity`); `resolutionStrategy` and `MovePath` (function-level in `Find-DuplicateFiles.ps1`); `TargetDir` (`Generate-DuplicateReport`); `MSIPath` (`Deploy-SoftwareToComputer`); `software` (DeploymentScript toast scriptblock). Remaining analyzer findings in this rule are documented false positives (script-level params used across functions, `$using:` refs) - see `PSScriptAnalyzerSettings.psd1`
+
 ## [3.0.0] - 2026-08-14
 
 ### Changed

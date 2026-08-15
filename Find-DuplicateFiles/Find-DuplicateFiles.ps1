@@ -145,8 +145,6 @@ function Find-DuplicateFiles {
         [ValidateSet('None', 'Delete', 'Move')]
         [string]$userConfirm = 'None',
         [string]$movePath = 'C:\DuplicateFiles',
-        [ValidateSet('Newest', 'Largest', 'MostAccessed', 'KeepAll')]
-        [string]$resolutionStrategy = 'Newest',
         [string]$reportPath = '.\DuplicateReport.html',
         [switch]$generateReport,
         [switch]$Simulate
@@ -253,7 +251,7 @@ function Find-DuplicateFiles {
     }
 
     if ($generateReport) {
-        Generate-DuplicateReport -Duplicates $duplicates -ReportPath $reportPath -TargetDir $targetDir
+        Generate-DuplicateReport -Duplicates $duplicates -ReportPath $reportPath
     }
 
     return $duplicates
@@ -289,8 +287,7 @@ function Resolve-DuplicatesIntelligently {
         [PSCustomObject[]]$Duplicates,
         [ValidateSet('Newest', 'Largest', 'MostAccessed', 'KeepAll')]
         [string]$ResolutionStrategy = 'Newest',
-        [switch]$Simulate,
-        [string]$MovePath = 'C:\DuplicateFiles'
+        [switch]$Simulate
     )
 
     $resolvedCount = 0
@@ -380,8 +377,7 @@ function Generate-DuplicateReport {
         [Parameter(Mandatory=$true)]
         [PSCustomObject[]]$Duplicates,
         [Parameter(Mandatory=$true)]
-        [string]$ReportPath,
-        [string]$TargetDir
+        [string]$ReportPath
     )
 
     $totalDuplicates = @($Duplicates).Count
@@ -599,7 +595,7 @@ function Analyze-DuplicatesByFileType {
 
 $duplicates = Find-DuplicateFiles -targetDir $targetDir -hashAlgorithm $hashAlgorithm `
     -exportPath $exportPath -excludeDirs $excludeDirs -excludeFileTypes $excludeFileTypes `
-    -userConfirm $userConfirm -movePath $movePath -resolutionStrategy $resolutionStrategy `
+    -userConfirm $userConfirm -movePath $movePath `
     -reportPath $reportPath -generateReport:$generateReport -Simulate:$Simulate
 
 if ($duplicates.Count -gt 0 -and $PSBoundParameters.ContainsKey('resolutionStrategy')) {

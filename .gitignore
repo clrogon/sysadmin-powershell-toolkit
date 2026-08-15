@@ -30,6 +30,7 @@ Thumbs.db
 *.ps1xml
 *.psd1
 !PSScriptAnalyzerSettings.psd1
+!modules/*.psd1
 
 # IDE and Editor files
 .vscode/
@@ -54,6 +55,9 @@ build/
 # Test outputs
 TestResults/
 Coverage/
+
+# Script report artifacts
+empty_folders.csv
 
 # Package files
 *.nupkg

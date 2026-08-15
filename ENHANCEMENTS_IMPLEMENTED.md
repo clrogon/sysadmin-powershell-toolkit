@@ -543,23 +543,20 @@ All 11 tasks identified in the real world scenarios improvement plan have been s
 ## Testing Recommendations
 
 ### Unit Testing
+
 ```powershell
-# Test Configuration Module
-Test-ConfigurationManagement.ps1
-
-# Test Logging Framework
-Test-LoggingFramework.ps1
-
-# Test Error Handling
-Test-ErrorHandling.ps1
+# Run the full Pester suite (module + script tests)
+Invoke-Pester -Path .\tests
 ```
+
+The `tests/` directory contains Pester tests for the three framework modules (`Configuration`, `Logging`, `ErrorHandling`) and for the individual scripts (Find-DuplicateFiles, Find-EmptyFolders, Measure-TransferSpeed, DeploymentScript, Show-Notification, RebootReminder, ClearTeamsCache). CI runs this suite on both Ubuntu and Windows.
 
 ### Integration Testing
 ```powershell
 # Test enhanced scripts with modules
-Import-Module modules\Configuration.psm1
-Import-Module modules\Logging.psm1
-Import-Module modules\ErrorHandling.psm1
+Import-Module modules\Configuration.psd1
+Import-Module modules\Logging.psd1
+Import-Module modules\ErrorHandling.psd1
 
 # Run each enhanced script
 .\Measure-TransferSpeed.ps1 -IncludeHistoricalComparison
@@ -586,9 +583,9 @@ Import-Module modules\ErrorHandling.psm1
 
 1. **Import Modules**
    ```powershell
-   Import-Module modules\Configuration.psm1
-   Import-Module modules\Logging.psm1
-   Import-Module modules\ErrorHandling.psm1
+   Import-Module modules\Configuration.psd1
+   Import-Module modules\Logging.psd1
+   Import-Module modules\ErrorHandling.psd1
    ```
 
 2. **Initialize Configuration**
@@ -667,10 +664,10 @@ Import-Module modules\ErrorHandling.psm1
 4. ✅ Create usage examples
 
 ### Short-Term Actions (Month 1)
-1. ⏳ Create automated test suite
-2. ⏳ Set up CI/CD pipeline
-3. ⏳ Implement Pester tests
-4. ⏳ Create integration tests
+1. ✅ Create automated test suite
+2. ✅ Set up CI/CD pipeline
+3. ✅ Implement Pester tests
+4. ✅ Create integration tests
 
 ### Long-Term Actions (Quarter 1-2)
 1. ⏳ Regular security audits
@@ -716,4 +713,5 @@ All enhancements have been implemented following PowerShell best practices and s
 
 **Implementation completed by**: Enhanced Repository
 **Date**: January 07, 2026
-**Next Review**: April 2026 (Quarterly)
+**Last Reviewed**: August 15, 2026
+**Next Review**: November 2026 (Quarterly)

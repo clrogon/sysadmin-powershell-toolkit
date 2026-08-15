@@ -48,7 +48,7 @@
 
 #Requires -Version 5.1
 
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)]
     [ValidateScript({Test-Path $_ -PathType 'Container'})]
@@ -166,7 +166,7 @@ function Find-EmptyFoldersSmart {
 }
 
 function Remove-EmptyFolders {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true)]
         [ValidateScript({Test-Path $_ -PathType 'Container'})]
@@ -198,7 +198,7 @@ function Remove-EmptyFolders {
                 continue
             }
 
-            if ($PSCmdlet.ShouldProcess($folder.Path, 'Remove empty folder')) {
+            if (-not $WhatIf) {
                 try {
                     Remove-Item -Path $folder.Path -Force:$Force -ErrorAction Stop
                     Write-ScriptLog -Level Info -Message "Removed: $($folder.Path)"
@@ -291,3 +291,4 @@ Find-EmptyFoldersSmart -FolderPath $FolderPath -IncludeSystemFiles:$IncludeSyste
 if ($RecursiveCleanup) {
     Remove-EmptyFolders -FolderPath $FolderPath -WhatIf:$WhatIf -Force:$Force -ExcludedPaths $ExcludedPaths
 }
+

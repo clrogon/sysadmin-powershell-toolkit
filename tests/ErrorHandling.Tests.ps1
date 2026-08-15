@@ -1,5 +1,5 @@
 # Requires Pester
-Import-Module (Join-Path $PSScriptRoot '..\modules\ErrorHandling.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\ErrorHandling') -Force
 
 Describe 'ErrorHandling module' {
     BeforeAll {

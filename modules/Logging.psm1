@@ -135,7 +135,8 @@ function Write-ScriptLog {
         [hashtable]$Metadata = @{},
         [switch]$NoConsole,
         [switch]$NoFile,
-        [switch]$NoEventLog
+        [switch]$NoEventLog,
+        [switch]$PassThru
     )
 
     $timestamp = Get-Date
@@ -204,7 +205,9 @@ function Write-ScriptLog {
         }
     }
 
-    return $logEntry
+    if ($PassThru) {
+        return $logEntry
+    }
 }
 
 function ConvertTo-CsvLine {

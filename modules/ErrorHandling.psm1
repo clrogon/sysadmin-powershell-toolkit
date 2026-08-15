@@ -86,8 +86,7 @@ function Test-NetworkConnectivity {
     param(
         [Parameter(Mandatory=$true)]
         [string]$ComputerName,
-        [int]$Count = 2,
-        [int]$TimeoutSeconds = 5
+        [int]$Count = 2
     )
 
     try {

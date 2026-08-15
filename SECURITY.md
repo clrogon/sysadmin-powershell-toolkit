@@ -181,5 +181,5 @@ For security-related questions or to report vulnerabilities, please contact the 
 
 ---
 
-**Last Updated**: January 2026
-**Version**: 1.0
+**Last Updated**: August 2026
+**Version**: 1.1

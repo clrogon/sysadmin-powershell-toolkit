@@ -1,6 +1,6 @@
 # Requires Pester
-Import-Module (Join-Path $PSScriptRoot '..\modules\Logging.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Logging') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration') -Force
 
 Describe 'Logging module' {
     BeforeAll {
@@ -12,7 +12,7 @@ Describe 'Logging module' {
     }
 
     It 'Writes a log entry and returns a structured object' {
-        $entry = Write-ScriptLog -Level Info -Message 'Test log entry' -NoConsole -NoEventLog
+        $entry = Write-ScriptLog -Level Info -Message 'Test log entry' -NoConsole -NoEventLog -PassThru
         $entry | Should -BeOfType PSCustomObject
         $entry.Level | Should -Be 'Info'
         $entry.Message | Should -Be 'Test log entry'

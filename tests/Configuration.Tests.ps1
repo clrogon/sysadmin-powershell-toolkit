@@ -1,5 +1,5 @@
 # Requires Pester
-Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot '..\modules\Configuration') -Force
 
 Describe 'Configuration module' {
     BeforeAll {
