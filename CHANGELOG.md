@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Modules now have proper `.psd1` manifests (`modules/Configuration.psd1`, `modules/Logging.psd1`, `modules/ErrorHandling.psd1`) with `RootModule`, version 3.0.0, full `FunctionsToExport`
 - Pester tests for the individual scripts via a new AST-extraction helper (`tests/Import-ScriptFunctions.ps1`): `Find-DuplicateFiles`, `Find-EmptyFolders`, `Measure-TransferSpeed`, `DeploymentScript`, `Show-Notification`, `RebootReminder`, `ClearTeamsCache` (45 tests added; suite now 65 tests, run on Ubuntu + Windows in CI)
+- Test coverage extended to the remaining untested scripts: `RebootReminder-Detection`, `RebootReminder-Remediation`, `USBPortManagement`, `signing/Sign-Scripts` (44 tests added; suite now 109 tests). USB policy/schedule/whitelist decision logic and event/disk mapping are tested via mocked `Test-Path`/`Import-Clixml`/`Get-Date`/`Get-WinEvent`/`Get-CimInstance`, keeping the suite admin-free and cross-platform
+- `RebootReminder-Detection.ps1` gained a `Test-RebootCompliance` function (pure uptime-vs-limit check extracted from the main block) so its decision logic is unit-testable; Intune exit-code behaviour is unchanged
 - Removed superseded `CONTRIBUTING_OLD.md` (fully replaced by `CONTRIBUTING.md`)
 
 ### Fixed

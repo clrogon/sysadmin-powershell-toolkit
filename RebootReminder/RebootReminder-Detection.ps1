@@ -15,6 +15,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Test-RebootCompliance {
+    param(
+        [Parameter(Mandatory=$true)]
+        [double]$UptimeDays,
+        [Parameter(Mandatory=$true)]
+        [int]$DaysLimit
+    )
+
+    return ($UptimeDays -ge $DaysLimit)
+}
+
 try {
     # Get system uptime
     $OS = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -27,7 +38,7 @@ try {
     Write-Host "Uptime: $UptimeDays days"
     Write-Host "Threshold: $DaysLimit days"
 
-    if ($UptimeDays -ge $DaysLimit) {
+    if (Test-RebootCompliance -UptimeDays $UptimeDays -DaysLimit $DaysLimit) {
         Write-Host "System is non-compliant: uptime exceeds $DaysLimit days"
         exit 1
     } else {
