@@ -49,6 +49,16 @@ Describe 'RebootReminder-Remediation.ps1' {
         }
     }
 
+    Describe 'Get-ReminderButtonSet' {
+        It 'offers Restart Now, Remind Me Later, and Dismiss for a normal reminder' {
+            (Get-ReminderButtonSet).Keys | Should -Be @('Restart Now', 'Remind Me Later', 'Dismiss')
+        }
+
+        It 'omits Remind Me Later for a final warning' {
+            (Get-ReminderButtonSet -FinalWarning).Keys | Should -Be @('Restart Now', 'Dismiss')
+        }
+    }
+
     Describe 'Write-Log' {
         It 'writes a timestamped line to the log file' {
             Mock Write-Host { }

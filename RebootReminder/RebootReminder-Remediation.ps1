@@ -2,8 +2,12 @@
 .SYNOPSIS
     Intune Remediation Script for Reboot Reminder
 .DESCRIPTION
-    Displays reboot reminder notification to user when system is non-compliant
-    Designed to run in user context for proper toast notifications
+    Displays a reboot reminder to the user when the system is non-compliant.
+    Shows a native pop-up window by default (reliable even when Windows toast
+    notifications are disabled or suppressed by Focus Assist); falls back to a
+    toast notification if Windows Forms cannot be loaded, or if -NotificationStyle
+    Toast is requested explicitly.
+    Designed to run in user context so the window renders on the user's desktop.
 #>
 
 param(
@@ -13,7 +17,11 @@ param(
 
     [Parameter(Mandatory=$false)]
     [ValidateRange(0,48)]
-    [int]$HoursLimit = 5
+    [int]$HoursLimit = 5,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet('Window','Toast')]
+    [string]$NotificationStyle = 'Window'
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +80,164 @@ function Show-ToastNotification {
     }
 }
 
+function Get-ReminderButtonSet {
+    param(
+        [Parameter(Mandatory=$false)]
+        [switch]$FinalWarning
+    )
+
+    if ($FinalWarning) {
+        return [ordered]@{
+            'Restart Now' = 'Restart'
+            'Dismiss'     = 'Dismiss'
+        }
+    }
+
+    return [ordered]@{
+        'Restart Now'     = 'Restart'
+        'Remind Me Later' = 'Snooze'
+        'Dismiss'         = 'Dismiss'
+    }
+}
+
+function Show-ReminderWindow {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Title,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Message,
+
+        [Parameter(Mandatory=$false)]
+        [System.Collections.Specialized.OrderedDictionary]$Buttons = (Get-ReminderButtonSet)
+    )
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    }
+    catch {
+        Write-Log -Message "Windows Forms is unavailable, cannot display the reminder window: $_" -Level "ERROR"
+        return 'Unavailable'
+    }
+
+    $form = New-Object -TypeName System.Windows.Forms.Form
+    $form.Text = $Title
+    $form.ClientSize = New-Object -TypeName System.Drawing.Size -ArgumentList 460, 220
+    $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+    $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.ControlBox = $true
+    $form.TopMost = $true
+    $form.ShowInTaskbar = $true
+    $form.Tag = $null
+
+    $titleLabel = New-Object -TypeName System.Windows.Forms.Label
+    $titleLabel.Text = $Title
+    $titleLabel.Font = New-Object -TypeName System.Drawing.Font -ArgumentList 'Segoe UI', 12, [System.Drawing.FontStyle]::Bold
+    $titleLabel.Location = New-Object -TypeName System.Drawing.Point -ArgumentList 20, 20
+    $titleLabel.Size = New-Object -TypeName System.Drawing.Size -ArgumentList 420, 30
+    $form.Controls.Add($titleLabel)
+
+    $messageLabel = New-Object -TypeName System.Windows.Forms.Label
+    $messageLabel.Text = $Message
+    $messageLabel.Font = New-Object -TypeName System.Drawing.Font -ArgumentList 'Segoe UI', 9
+    $messageLabel.Location = New-Object -TypeName System.Drawing.Point -ArgumentList 20, 55
+    $messageLabel.Size = New-Object -TypeName System.Drawing.Size -ArgumentList 420, 90
+    $form.Controls.Add($messageLabel)
+
+    $buttonPanel = New-Object -TypeName System.Windows.Forms.FlowLayoutPanel
+    $buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+    $buttonPanel.Location = New-Object -TypeName System.Drawing.Point -ArgumentList 20, 160
+    $buttonPanel.Size = New-Object -TypeName System.Drawing.Size -ArgumentList 420, 40
+
+    $isPrimaryButton = $true
+
+    foreach ($entry in $Buttons.GetEnumerator()) {
+        $button = New-Object -TypeName System.Windows.Forms.Button
+        $button.Text = $entry.Key
+        $button.Tag = $entry.Value
+        $button.Width = 135
+        $button.Height = 32
+        $button.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $button.Add_Click({
+            param($sender)
+            $sender.FindForm().Tag = $sender.Tag
+        })
+
+        if ($isPrimaryButton) {
+            $button.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 212)
+            $button.ForeColor = [System.Drawing.Color]::White
+            $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+            $form.AcceptButton = $button
+            $isPrimaryButton = $false
+        }
+
+        $buttonPanel.Controls.Add($button)
+    }
+
+    $form.Controls.Add($buttonPanel)
+
+    try {
+        [void]$form.ShowDialog()
+    }
+    catch {
+        Write-Log -Message "Failed to display the reminder window: $_" -Level "ERROR"
+        $form.Dispose()
+        return 'Unavailable'
+    }
+
+    $finalResult = if ([string]::IsNullOrEmpty([string]$form.Tag)) { 'Dismiss' } else { [string]$form.Tag }
+    $form.Dispose()
+
+    Write-Log -Message "Reminder window closed with result: $finalResult"
+    return $finalResult
+}
+
+function Test-RequiresStaRelaunch {
+    try {
+        return [System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA
+    }
+    catch {
+        return $false
+    }
+}
+
+function Start-StaRelaunch {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ScriptPath,
+
+        [Parameter(Mandatory=$true)]
+        [System.Collections.IDictionary]$BoundParameters
+    )
+
+    $hostExePath = try {
+        (Get-Process -Id $PID -ErrorAction Stop).Path
+    }
+    catch {
+        'powershell.exe'
+    }
+
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Sta', '-File', $ScriptPath)
+
+    foreach ($key in $BoundParameters.Keys) {
+        $value = $BoundParameters[$key]
+        $arguments += "-$key"
+        $arguments += [string]$value
+    }
+
+    Write-Log -Message "Relaunching under a Single-Threaded Apartment for the reminder window"
+
+    $process = Start-Process -FilePath $hostExePath -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+    exit $process.ExitCode
+}
+
+if ($NotificationStyle -eq 'Window' -and (Test-RequiresStaRelaunch)) {
+    Start-StaRelaunch -ScriptPath $PSCommandPath -BoundParameters $PSBoundParameters
+}
+
 try {
     Write-Log -Message "Reboot Reminder Remediation started"
 
@@ -110,12 +276,23 @@ try {
         }
 
         if ($hoursSinceReminder -ge 1) {
-            Write-Log -Message "Displaying reboot reminder notification"
+            Write-Log -Message "Displaying reboot reminder"
 
             $title = "System Reboot Required"
             $message = "Your system hasn't been rebooted in $UptimeDays days. Please restart to ensure security updates are applied."
 
-            Show-ToastNotification -Title $title -Message $message
+            $response = 'ToastSent'
+
+            if ($NotificationStyle -eq 'Window') {
+                $response = Show-ReminderWindow -Title $title -Message $message
+                if ($response -eq 'Unavailable') {
+                    Write-Log -Message "Reminder window unavailable, falling back to a toast notification" -Level "WARN"
+                    Show-ToastNotification -Title $title -Message $message
+                }
+            }
+            else {
+                Show-ToastNotification -Title $title -Message $message
+            }
 
             # Update tracking
             if (-not (Test-Path $trackingPath)) {
@@ -123,7 +300,12 @@ try {
             }
             Set-ItemProperty -Path $trackingPath -Name "LastReminder" -Value (Get-Date) -Force
 
-            Write-Log -Message "Notification displayed successfully"
+            Write-Log -Message "Notification displayed successfully (response: $response)"
+
+            if ($response -eq 'Restart') {
+                Write-Log -Message "User chose to restart immediately" -Level "WARN"
+                Restart-Computer -Force
+            }
         } else {
             Write-Log -Message "Skipping: Notification shown less than 1 hour ago"
         }

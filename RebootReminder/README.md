@@ -2,13 +2,16 @@
 
 ## Description
 
-**RebootReminder.ps1** is an enhanced PowerShell script designed to encourage regular system reboots to maintain security and performance on Windows-based workstations. Fully compatible with **Windows 10/11** and **Microsoft Intune**, it uses modern toast notifications to remind users to reboot their system and enforces reboots after a defined grace period.
+**RebootReminder.ps1** is an enhanced PowerShell script designed to encourage regular system reboots to maintain security and performance on Windows-based workstations. Fully compatible with **Windows 10/11** and **Microsoft Intune**, it shows users a reminder to reboot their system and enforces reboots after a defined grace period.
+
+By default the reminder is a **native pop-up window** (Windows Forms), not a toast notification. Toast notifications are easy for a user to silence permanently (Focus Assist, per-app notification settings, "Get notifications from apps" toggle) without the script ever finding out, and their action buttons are not wired to anything actionable. The pop-up window is topmost, always renders regardless of notification settings, has a visible title-bar close button, and its Restart Now / Remind Me Later / Dismiss buttons drive real script behavior (an immediate restart, or a tracked snooze/dismiss). The legacy toast notification (BurntToast, with a native fallback) is still available via `-NotificationStyle Toast`, and is used automatically if the window cannot be displayed (e.g. Windows Forms unavailable).
 
 ## Key Features
 
-- ✅ **Windows 11 Compatible** - Modern toast notifications with Windows.UI.Notifications
+- ✅ **Native Pop-up Window (Default)** - Topmost Windows Forms window with working Restart/Snooze/Dismiss buttons; immune to notification settings and Focus Assist
+- ✅ **Windows 11 Compatible** - Works alongside modern toast notifications with Windows.UI.Notifications
 - ✅ **Intune Proactive Remediations Support** - Detection and remediation scripts ready
-- ✅ **BurntToast Module Support** - Enhanced notifications when available
+- ✅ **BurntToast Module Support** - Optional legacy toast notifications via `-NotificationStyle Toast`
 - ✅ **User and SYSTEM Context** - Works in both contexts seamlessly
 - ✅ **Weekend and Work Hours Awareness** - Respects off-hours and weekends
 - ✅ **Compliance Reporting** - JSON-based compliance tracking and reporting
@@ -16,13 +19,14 @@
 - ✅ **Scheduled Task Integration** - Built-in functions for task scheduling
 - ✅ **Enhanced Logging** - Comprehensive logging with size management
 - ✅ **User Tracking** - Tracks dismissals and reminder history
-- ✅ **Fallback Notifications** - Native notifications when BurntToast unavailable
+- ✅ **Automatic Fallback** - Falls back to a toast notification if the pop-up window cannot be shown
 
 ## Requirements
 
 - **Operating System**: Windows 10 (1809+) or Windows 11
 - **PowerShell**: PowerShell 5.1 or PowerShell 7+
-- **Optional**: BurntToast module from PowerShell Gallery (install with `Install-Module -Name BurntToast`)
+- **Pop-up window (default)**: No extra install - uses `System.Windows.Forms`, which ships with Windows PowerShell/.NET. Requires a Single-Threaded Apartment (STA); the script detects this automatically and relaunches itself with `-Sta` if needed.
+- **Optional (for `-NotificationStyle Toast`)**: BurntToast module from PowerShell Gallery (install with `Install-Module -Name BurntToast`)
 - **Permissions**: Administrator rights for system-wide deployment
 
 ## Usage
@@ -83,6 +87,7 @@ Forces immediate reboot after displaying final warning.
 | `IntuneMode` | Switch | $false | Run in Intune-compatible mode (no long-running processes) |
 | `CheckOnly` | Switch | $false | Return exit code based on compliance only (for detection scripts) |
 | `ForceReboot` | Switch | $false | Force reboot after grace period |
+| `NotificationStyle` | String | Window | `Window` (default pop-up window) or `Toast` (legacy toast notification) |
 | `DismissTimeHours` | Int | 24 | Hours user can dismiss reminders (0-168) |
 | `ComplianceReportPath` | String | $env:ProgramData\RebootCompliance.json | Path for compliance report JSON file |
 
@@ -175,20 +180,31 @@ Create a Package or Application in SCCM with the script as a program:
 
 ## Notification Behavior
 
+### Pop-up Window (default, `-NotificationStyle Window`)
+- Topmost, centered window with the script's own title bar - closeable at any time via the **X** button
+- Buttons are real: **Restart Now** triggers an immediate restart, **Remind Me Later** just closes the window (the next scheduled run reminds again), **Dismiss** records a dismissal
+- Auto-closes after a short timeout if left unattended (3 minutes for a normal reminder, 30 seconds for the final warning) so the reminder never blocks the task indefinitely
+- Falls back to a toast notification automatically if Windows Forms cannot be loaded
+
+### Toast Notification (`-NotificationStyle Toast`)
+- Uses BurntToast if installed, otherwise a native Windows toast
+- Can be silenced by the user via Focus Assist or per-app notification settings, with no way for the script to detect this
+- Kept for environments that specifically want the toast experience
+
 ### Normal Reminder
 - Displayed when uptime exceeds `DaysLimit`
 - Shows current uptime and grace period remaining
-- Three buttons: **Restart Now**, **Snooze 1 Hour**, **Dismiss**
+- Three options: **Restart Now**, **Remind Me Later**, **Dismiss**
 
 ### Final Warning
 - Displayed when grace period is almost expired (1 hour or less remaining)
 - Clear warning that reboot will be enforced
-- Same action buttons available
+- **Remind Me Later** is omitted; only **Restart Now** and **Dismiss** are offered
 
 ### Forced Reboot
-- 10-minute countdown with recurring notifications
-- System forces restart after countdown
-- User cannot dismiss final notifications
+- A final pop-up/toast gives the user one more chance to restart immediately
+- Otherwise, a 10-minute countdown follows with recurring log entries
+- System forces restart after countdown; the user cannot dismiss the forced restart itself
 
 ## Compliance Tracking
 
@@ -219,9 +235,19 @@ $report | Group-Object Compliant | Select-Object Name, Count
 
 ## Troubleshooting
 
-### Script Not Showing Notifications
+### Script Not Showing a Reminder
 
-**Problem**: Toast notifications not appearing
+**Problem**: The pop-up window (default `-NotificationStyle Window`) never appears
+
+**Solutions**:
+1. Confirm the script is running in the logged-on user's session, not a non-interactive SYSTEM session with no desktop - a window (like a toast) can only render on an active desktop
+2. Check the log for `"Relaunching under a Single-Threaded Apartment"` or `"Windows Forms is unavailable"` entries - the script relaunches itself with `-Sta` automatically, but a locked-down environment may block the relaunch
+3. Check script logs for errors:
+   ```powershell
+   Get-Content "$env:USERPROFILE\RebootLog.log" -Tail 50
+   ```
+
+**Problem**: Toast notifications not appearing (`-NotificationStyle Toast`)
 
 **Solutions**:
 1. Check if notifications are enabled in Windows Settings:
@@ -236,6 +262,7 @@ $report | Group-Object Compliant | Select-Object Name, Count
    ```powershell
    Get-Content "$env:USERPROFILE\RebootLog.log" -Tail 50
    ```
+4. Prefer the default pop-up window instead - it is immune to notification settings and Focus Assist: omit `-NotificationStyle Toast` (or pass `-NotificationStyle Window` explicitly)
 
 ### Intune Script Not Running
 
@@ -313,6 +340,12 @@ $history | Format-Table -AutoSize
 - **No External Dependencies**: Optional BurntToast module for enhanced features
 
 ## Version History
+
+- **6.1** - Native pop-up window as the default reminder
+  - Added a topmost Windows Forms pop-up window (`-NotificationStyle Window`, default) with real Restart Now/Remind Me Later/Dismiss buttons
+  - Toast notifications demoted to opt-in (`-NotificationStyle Toast`) and used as an automatic fallback if the window cannot be displayed
+  - Script relaunches itself with `-Sta` automatically when the hosting process is not a Single-Threaded Apartment
+  - Button clicks now drive real tracking/reboot behavior instead of being cosmetic
 
 - **6.0** - Complete rewrite for Windows 11 and Intune compatibility
   - Added Intune Proactive Remediations support
