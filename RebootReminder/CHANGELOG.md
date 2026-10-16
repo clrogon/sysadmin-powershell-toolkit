@@ -2,6 +2,34 @@
 
 All notable changes to the RebootReminder.ps1 script will be documented in this file.
 
+## [6.1.0] - 2026-10-16
+
+### Native Pop-up Window Replaces Toast as the Default Reminder
+
+Toast notifications can be silenced by the user (Focus Assist, per-app notification
+settings) without the script ever finding out, and their action buttons were never
+wired to any real behavior. This release adds a topmost Windows Forms pop-up window
+as the default reminder, used by both `RebootReminder.ps1` and
+`RebootReminder-Remediation.ps1`.
+
+#### Added
+- `Show-RebootReminderWindow` / `Show-ReminderWindow` - a topmost, centered pop-up
+  window with a visible title-bar close button and working Restart Now / Remind Me
+  Later / Dismiss buttons
+- `-NotificationStyle` parameter (`Window` default, `Toast` for the legacy behavior)
+- Automatic fallback to the toast notification if Windows Forms cannot be loaded
+- Automatic relaunch with `-Sta` when the hosting process is not already running in
+  a Single-Threaded Apartment (required by Windows Forms)
+- `Get-ReminderButtonSet` helper controlling which buttons are offered (the final
+  warning omits "Remind Me Later" since the grace period is nearly over)
+
+#### Changed
+- Clicking "Restart Now" now triggers an immediate restart; clicking "Dismiss" now
+  records the dismissal via `Update-RebootTracking -Action 'Dismiss'` - both were
+  previously cosmetic toast button labels with no handler behind them
+- `Register-RebootReminderTask` / `Register-UserContextTask` now launch
+  `PowerShell.exe` with `-Sta`
+
 ## [6.0.0] - 2025-01-14
 
 ### Completely Rewritten for Windows 11 and Intune Compatibility

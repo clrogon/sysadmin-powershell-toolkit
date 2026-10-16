@@ -41,5 +41,26 @@ Describe 'RebootReminder.ps1' {
             Test-IsWorkHours | Should -BeFalse
         }
     }
+
+    Describe 'Get-ReminderButtonSet' {
+        It 'offers Restart Now, Remind Me Later, and Dismiss for a normal reminder' {
+            (Get-ReminderButtonSet).Keys | Should -Be @('Restart Now', 'Remind Me Later', 'Dismiss')
+        }
+
+        It 'omits Remind Me Later for a final warning' {
+            (Get-ReminderButtonSet -FinalWarning).Keys | Should -Be @('Restart Now', 'Dismiss')
+        }
+
+        It 'always lists Restart Now first so it renders as the primary action' {
+            (Get-ReminderButtonSet).Keys | Select-Object -First 1 | Should -Be 'Restart Now'
+            (Get-ReminderButtonSet -FinalWarning).Keys | Select-Object -First 1 | Should -Be 'Restart Now'
+        }
+
+        It 'maps every button label to a valid action tag' {
+            $validActions = @('Restart', 'Snooze', 'Dismiss')
+            (Get-ReminderButtonSet).Values | ForEach-Object { $validActions | Should -Contain $_ }
+            (Get-ReminderButtonSet -FinalWarning).Values | ForEach-Object { $validActions | Should -Contain $_ }
+        }
+    }
 }
 
