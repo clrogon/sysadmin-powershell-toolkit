@@ -519,8 +519,8 @@ function Show-RebootReminderWindow {
         $button.Height = 32
         $button.DialogResult = [System.Windows.Forms.DialogResult]::OK
         $button.Add_Click({
-            param($sender)
-            $sender.FindForm().Tag = $sender.Tag
+            param($clickedButton)
+            $clickedButton.FindForm().Tag = $clickedButton.Tag
         })
 
         if ($isPrimaryButton) {
